@@ -1,0 +1,7 @@
+com.sun.tools.javac.resources.compiler
+com.sun.tools.javac.resources.javac
+com.sun.tools.javac.resources.version
+com.sun.tools.javac.resources.legacy
+org.teavm.rhino.javascript.resources.Messages
+org.teavm.rhino.javascript.resources.Messages_en
+org.teavm.rhino.javascript.resources.Messages_fr
