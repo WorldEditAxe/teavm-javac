@@ -12,6 +12,10 @@ Unlike the original project, this fork is written to be more developer-oriented 
 
 Resulting library archive can be found at `compiler/build/distributions/dist.zip`.
 
+## Repository layout
+
+See [docs/REPOSITORY_STRUCTURE.md](docs/REPOSITORY_STRUCTURE.md) for the module and source-root map.
+
 ## Using as a library
 
 If you're too lazy to build, the `dist` folder comes with a build ready for use.

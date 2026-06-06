@@ -29,4 +29,10 @@ public interface JavaScriptCompilationOptions extends JSObject {
 
     @JSProperty
     JSString getModuleType();
+
+    @JSProperty
+    boolean isSourceMap();
+
+    @JSProperty
+    JSString getSourceMapName();
 }

@@ -21,6 +21,8 @@ import com.sun.tools.javac.util.Context;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -48,6 +50,8 @@ import org.teavm.classlib.java.lang.LongNativeGenerator;
 import org.teavm.classlib.java.lang.MathNativeGenerator;
 import org.teavm.classlib.java.lang.SystemDependencyPlugin;
 import org.teavm.classlib.java.lang.SystemNativeGenerator;
+import org.teavm.debugging.information.DebugInformationBuilder;
+import org.teavm.debugging.information.SourceMapsWriter;
 import org.teavm.jso.JSClass;
 import org.teavm.jso.JSExport;
 import org.teavm.jso.core.JSObjects;
@@ -69,6 +73,11 @@ import org.teavm.vm.TeaVM;
 import org.teavm.vm.TeaVMBuilder;
 import org.teavm.vm.TeaVMOptimizationLevel;
 import org.teavm.vm.TeaVMTarget;
+import processing.mode.java.preproc.PdePreprocessIssue;
+import processing.mode.java.preproc.PdePreprocessor;
+import processing.mode.java.preproc.PreprocessorResult;
+import processing.mode.java.preproc.TextTransform;
+import processing.utils.SketchException;
 import static com.sun.tools.javac.comp.CompileStates.CompileState;
 
 @JSClass(name = "Compiler")
@@ -83,6 +92,7 @@ public final class Compiler {
             "absImpl", "sign");
     private static final Set<String> SYSTEM_NATIVE_METHODS = Set.of("doArrayCopy", "currentTimeMillis");
     private final Map<String, FileData> sourceFiles = new LinkedHashMap<>();
+    private final Map<String, FileData> processingSourceFiles = new LinkedHashMap<>();
     private final Map<String, FileData> classFiles = new LinkedHashMap<>();
     private final Map<String, FileData> sdkFiles = new LinkedHashMap<>();
     private final Map<String, FileData> teavmClasslibFiles = new LinkedHashMap<>();
@@ -105,6 +115,47 @@ public final class Compiler {
     @JSExport
     public void clearSourceFiles() {
         sourceFiles.clear();
+    }
+
+    @JSExport
+    public void addProcessingSourceFile(String name, String content) {
+        addFile(processingSourceFiles, name, content.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @JSExport
+    public void clearProcessingSourceFiles() {
+        processingSourceFiles.clear();
+    }
+
+    @JSExport
+    public ProcessingPreprocessResult preprocessProcessing(String sketchName) throws SketchException {
+        if (processingSourceFiles.isEmpty()) {
+            throw new IllegalArgumentException("No Processing sources added");
+        }
+
+        var className = toJavaIdentifier(sketchName, "ProcessingSketch");
+        var combined = combineProcessingSources();
+        var writer = new StringWriter();
+        var preprocessor = PdePreprocessor.builderFor(className)
+                .setTabSize(4)
+                .build();
+        PreprocessorResult result = preprocessor.write(writer, combined.source);
+        var javaSource = writer.toString();
+        var sourceFileName = className + ".java";
+
+        return new ProcessingPreprocessResult(
+                result.getPreprocessIssues().isEmpty(),
+                sourceFileName,
+                result.getClassName(),
+                javaSource,
+                result.getProgramType().name(),
+                result.getHeaderOffset(),
+                result.getSketchWidth(),
+                result.getSketchHeight(),
+                result.getSketchRenderer(),
+                tabsToJson(combined.tabs),
+                editsToJson(result.getEdits()),
+                issuesToJson(result.getPreprocessIssues()));
     }
 
     @JSExport
@@ -258,6 +309,133 @@ public final class Compiler {
         return data;
     }
 
+    private ProcessingCombinedSource combineProcessingSources() {
+        var tabs = new ArrayList<ProcessingSourceTab>();
+        var source = new StringBuilder();
+        var lineStart = 0;
+        for (var file : processingSourceFiles.values()) {
+            var content = new String(file.data, StandardCharsets.UTF_8);
+            var charStart = source.length();
+            tabs.add(new ProcessingSourceTab(file.path, charStart, lineStart, countLines(content)));
+            source.append(content);
+            source.append('\n');
+            lineStart += countLines(content);
+        }
+        return new ProcessingCombinedSource(source.toString(), tabs);
+    }
+
+    private static int countLines(String text) {
+        var count = 1;
+        for (var i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == '\n') {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static String toJavaIdentifier(String value, String defaultValue) {
+        if (value == null || value.isEmpty()) {
+            return defaultValue;
+        }
+        var result = new StringBuilder();
+        for (var i = 0; i < value.length(); i++) {
+            var ch = value.charAt(i);
+            if (i == 0) {
+                result.append(Character.isJavaIdentifierStart(ch) ? ch : '_');
+            } else {
+                result.append(Character.isJavaIdentifierPart(ch) ? ch : '_');
+            }
+        }
+        if (result.length() == 0 || !Character.isJavaIdentifierStart(result.charAt(0))) {
+            result.insert(0, '_');
+        }
+        return result.toString();
+    }
+
+    private static String tabsToJson(List<ProcessingSourceTab> tabs) {
+        var result = new StringBuilder("[");
+        for (var i = 0; i < tabs.size(); i++) {
+            if (i > 0) {
+                result.append(',');
+            }
+            var tab = tabs.get(i);
+            result.append('{')
+                    .append("\"path\":").append(jsonString(tab.path)).append(',')
+                    .append("\"charStart\":").append(tab.charStart).append(',')
+                    .append("\"lineStart\":").append(tab.lineStart).append(',')
+                    .append("\"lineCount\":").append(tab.lineCount)
+                    .append('}');
+        }
+        return result.append(']').toString();
+    }
+
+    private static String editsToJson(List<TextTransform.Edit> edits) {
+        var result = new StringBuilder("[");
+        for (var i = 0; i < edits.size(); i++) {
+            if (i > 0) {
+                result.append(',');
+            }
+            var edit = edits.get(i);
+            result.append('{')
+                    .append("\"fromOffset\":").append(edit.getFromOffset()).append(',')
+                    .append("\"fromLength\":").append(edit.getFromLength()).append(',')
+                    .append("\"toOffset\":").append(edit.getToOffset()).append(',')
+                    .append("\"toLength\":").append(edit.getToLength()).append(',')
+                    .append("\"text\":").append(jsonString(edit.getOutputText()))
+                    .append('}');
+        }
+        return result.append(']').toString();
+    }
+
+    private static String issuesToJson(List<PdePreprocessIssue> issues) {
+        var result = new StringBuilder("[");
+        for (var i = 0; i < issues.size(); i++) {
+            if (i > 0) {
+                result.append(',');
+            }
+            var issue = issues.get(i);
+            result.append('{')
+                    .append("\"line\":").append(issue.getLine()).append(',')
+                    .append("\"column\":").append(issue.getCharPositionInLine()).append(',')
+                    .append("\"message\":").append(jsonString(issue.getMsg()))
+                    .append('}');
+        }
+        return result.append(']').toString();
+    }
+
+    private static String jsonString(String value) {
+        if (value == null) {
+            return "null";
+        }
+        var result = new StringBuilder("\"");
+        for (var i = 0; i < value.length(); i++) {
+            var ch = value.charAt(i);
+            switch (ch) {
+                case '"' -> result.append("\\\"");
+                case '\\' -> result.append("\\\\");
+                case '\b' -> result.append("\\b");
+                case '\f' -> result.append("\\f");
+                case '\n' -> result.append("\\n");
+                case '\r' -> result.append("\\r");
+                case '\t' -> result.append("\\t");
+                default -> {
+                    if (ch < 0x20) {
+                        result.append("\\u");
+                        var hex = Integer.toHexString(ch);
+                        for (var j = hex.length(); j < 4; j++) {
+                            result.append('0');
+                        }
+                        result.append(hex);
+                    } else {
+                        result.append(ch);
+                    }
+                }
+            }
+        }
+        return result.append('"').toString();
+    }
+
     @JSExport
     public boolean compile() {
         initCompiler();
@@ -306,15 +484,46 @@ public final class Compiler {
     public boolean generateJavaScript(JavaScriptCompilationOptions options) {
         var outputName = getOptionalString(options.getOutputName(), "classes.js");
         var mainClass = getRequiredString(options.getMainClass(), "Main class");
+        var sourceMap = options.isSourceMap();
+        var sourceMapName = getOptionalString(options.getSourceMapName(), outputName + ".map");
 
         var target = new JavaScriptTarget();
         var refCache = new ReferenceCache();
+        DebugInformationBuilder debugInformationBuilder = null;
+        if (sourceMap) {
+            debugInformationBuilder = new DebugInformationBuilder(refCache);
+            target.setDebugEmitter(debugInformationBuilder);
+        }
         var teavm = createTeaVM(target, refCache);
         teavm.setEntryPoint(mainClass);
         target.setObfuscated(false);
         target.setModuleType(getModuleType(options.getModuleType()));
-        teavm.build(new MemoryBuildTarget(javaScriptOutputFiles), outputName);
+        var buildTarget = new MemoryBuildTarget(javaScriptOutputFiles);
+        teavm.build(buildTarget, outputName);
+        if (sourceMap && debugInformationBuilder != null) {
+            try (var writer = new OutputStreamWriter(buildTarget.createResource(sourceMapName),
+                    StandardCharsets.UTF_8)) {
+                var sourceMapsWriter = new SourceMapsWriter(writer);
+                sourceMapsWriter.write(outputName, "", debugInformationBuilder.getDebugInformation());
+            } catch (IOException e) {
+                throw new RuntimeException("Could not write JavaScript source map", e);
+            }
+            appendSourceMapComment(outputName, sourceMapName);
+        }
         return reportTeaVMDiagnostics(teavm);
+    }
+
+    private void appendSourceMapComment(String outputName, String sourceMapName) {
+        var file = javaScriptOutputFiles.get(outputName);
+        if (file == null) {
+            return;
+        }
+        var text = new String(file.data, StandardCharsets.UTF_8);
+        if (!text.contains("sourceMappingURL=")) {
+            text += "\n//# sourceMappingURL=" + sourceMapName + "\n";
+            file.data = text.getBytes(StandardCharsets.UTF_8);
+            file.lastModified = System.currentTimeMillis();
+        }
     }
 
     private TeaVM createTeaVM(TeaVMTarget target, ReferenceCache refCache) {
@@ -543,6 +752,30 @@ public final class Compiler {
             enterTrees(stopIfError(CompileState.ENTER, initModules(units)));
             generate(desugar(flow(attribute(todo))));
             return log.nerrors == 0;
+        }
+    }
+
+    private static class ProcessingCombinedSource {
+        final String source;
+        final List<ProcessingSourceTab> tabs;
+
+        ProcessingCombinedSource(String source, List<ProcessingSourceTab> tabs) {
+            this.source = source;
+            this.tabs = tabs;
+        }
+    }
+
+    private static class ProcessingSourceTab {
+        final String path;
+        final int charStart;
+        final int lineStart;
+        final int lineCount;
+
+        ProcessingSourceTab(String path, int charStart, int lineStart, int lineCount) {
+            this.path = path;
+            this.charStart = charStart;
+            this.lineStart = lineStart;
+            this.lineCount = lineCount;
         }
     }
 

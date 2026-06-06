@@ -1,0 +1,228 @@
+<?xml version="1.0"?>
+<project name="Processing Core" default="build">
+
+  <property environment="env" />
+
+  <target name="methods-check">
+    <available file="methods/methods.jar" property="methods.present" />
+  </target>
+
+  <target name="methods-build" depends="methods-check" unless="methods.present">
+    <subant buildpath="methods" target="dist" />
+  </target>
+
+  <!-- Base URL for the current version of JOGL. -->
+  <!--
+  <property name="jogl.url"
+            value="https://jogamp.org/deployment/archive/rc/v2.4.0-rc-20210111/jar" />
+  -->
+  <!-- This is for posterity, and is not used at present. When updating
+       the release, also make a copy of the files on download.processing.org
+       so that they can be retrieved even after the original link goes dead. -->
+  <!--
+  <property name="jogl.url.backup"
+            value="https://download.processing.org/jogl/v2.4.0-rc-20210111" />
+  -->
+  <!-- Active version for Processing 4.0 to 4.1.3 -->
+  <property name="jogl.url"
+            value="https://download.processing.org/jogl/v2.4.0-rc-20210111y" />
+
+  <!-- TODO new RC versions posted in February 2023... -->
+  <!--
+  <property name="jogl.url"
+            value="https://jogamp.org/deployment/archive/rc/v2.4.0/jar" />
+  -->
+
+  <available file="library/jogl-all.jar" property="jogl.present" />
+
+  <!-- ok to ignore failed downloads if we at least have a version that's local -->
+  <condition property="jogl.ignorable" value="false" else="true">
+    <isset property="jogl.present" />
+  </condition>
+
+  <target name="download-jogl" unless="jogl.present">
+    <get dest="library" usetimestamp="true" ignoreerrors="${jogl.ignorable}">
+      <!--
+      <url url="${jogl.url}/gluegen-rt-natives-linux-aarch64.jar" />
+      <url url="${jogl.url}/gluegen-rt-natives-linux-amd64.jar" />
+      <url url="${jogl.url}/gluegen-rt-natives-linux-arm.jar" />
+      <url url="${jogl.url}/gluegen-rt-natives-macos-aarch64.jar" />
+      <url url="${jogl.url}/gluegen-rt-natives-macos-x86_64.jar" />
+      <url url="${jogl.url}/gluegen-rt-natives-windows-amd64.jar" />
+      -->
+      <url url="${jogl.url}/gluegen-rt.jar" />
+      <!--
+      <url url="${jogl.url}/jogl-all-natives-linux-aarch64.jar" />
+      <url url="${jogl.url}/jogl-all-natives-linux-amd64.jar" />
+      <url url="${jogl.url}/jogl-all-natives-linux-arm.jar" />
+      <url url="${jogl.url}/jogl-all-natives-macos-aarch64.jar" />
+      <url url="${jogl.url}/jogl-all-natives-macos-x86_64.jar" />
+      <url url="${jogl.url}/jogl-all-natives-windows-amd64.jar" />
+      -->
+      <url url="${jogl.url}/jogl-all.jar" />
+    </get>
+
+    <antcall target="retrieve-variant">
+      <param name="variant" value="linux-aarch64" />
+    </antcall>
+    <antcall target="retrieve-variant">
+      <param name="variant" value="linux-arm" />
+    </antcall>
+    <antcall target="retrieve-variant">
+      <param name="variant" value="linux-amd64" />
+    </antcall>
+    <antcall target="retrieve-variant">
+      <param name="variant" value="macos-aarch64" />
+    </antcall>
+    <antcall target="retrieve-variant">
+      <param name="variant" value="macos-x86_64" />
+    </antcall>
+    <antcall target="retrieve-variant">
+      <param name="variant" value="windows-amd64" />
+    </antcall>
+  </target>
+
+  <target name="retrieve-variant">
+    <get src="${jogl.url}/gluegen-rt-natives-${variant}.jar"
+         dest="temp-gluegen.jar"
+         ignoreerrors="${jogl.ignorable}"
+         usetimestamp="true" />
+    <get src="${jogl.url}/jogl-all-natives-${variant}.jar"
+         dest="temp-jogl.jar"
+         ignoreerrors="${jogl.ignorable}"
+         usetimestamp="true" />
+
+    <mkdir dir="library/${variant}" />
+
+    <unzip dest="library/${variant}" src="temp-gluegen.jar" overwrite="true">
+      <patternset>
+        <include name="**/*.dll" />
+        <include name="**/*.dylib" />
+        <include name="**/*.so" />
+      </patternset>
+      <mapper type="flatten" />
+    </unzip>
+    <unzip dest="library/${variant}" src="temp-jogl.jar" overwrite="true">
+      <patternset>
+        <include name="**/*.dll" />
+        <include name="**/*.dylib" />
+        <include name="**/*.so" />
+      </patternset>
+      <mapper type="flatten" />
+    </unzip>
+
+    <delete file="temp-gluegen.jar" />
+    <delete file="temp-jogl.jar" />
+  </target>
+
+  <path id="classpath.base">
+    <pathelement location="library/jogl-all.jar" />
+    <pathelement location="library/gluegen-rt.jar" />
+  </path>
+
+  <path id="classpath.test">
+    <pathelement location="library-test/junit-4.13.2.jar" />
+    <pathelement location="library-test/hamcrest-core-1.3.jar" />
+    <pathelement location="bin-test" />
+    <path refid="classpath.base" />
+  </path>
+
+  <macrodef name="compilecommon">
+    <attribute name="destdir" />
+    <attribute name="srcdir" />
+    <attribute name="classpath" />
+    <sequential>
+      <taskdef name="methods"
+               classname="PAppletMethods"
+               classpath="methods/methods.jar" />
+      <methods dir="${basedir}/src/processing/core" recorder="true" />
+
+      <!-- Where can I expect to find Java Mode JARs? -->
+      <property name="java.mode" value="../java/mode/" />
+
+      <mkdir dir="@{destdir}" />
+      <javac source="17"
+             target="17"
+             encoding="UTF-8"
+             includeAntRuntime="false"
+             debug="true"
+             destdir="@{destdir}"
+             nowarn="true">
+        <classpath refid="@{classpath}" />
+        <src path="@{srcdir}" />
+        <include name="processing/**" />
+      </javac>
+
+      <!-- Copy the jnilib to the bin folder so it's included. -->
+      <copy todir="bin/processing/core"
+            file="src/processing/core/libDifferent.jnilib" />
+
+      <!-- Copy the helper code for checking Windows resolution. -->
+      <copy todir="library/windows-amd64"
+            file="../build/windows/fenster/fenster.exe" />
+
+      <!-- Copy shaders to bin. (Eclipse does this automatically.) -->
+      <copy todir="bin">
+        <fileset dir="src">
+          <include name="processing/opengl/shaders/*.glsl" />
+          <include name="processing/opengl/cursors/*.png" />
+          <include name="font/ProcessingSansPro-*" />
+          <include name="icon/*.png" />
+        </fileset>
+      </copy>
+    </sequential>
+  </macrodef>
+
+  <target name="test-compile" description="Compile" depends="methods-build">
+    <compilecommon srcdir="src; test" destdir="bin-test" classpath="classpath.test" />
+  </target>
+
+  <target name="clean-pre-test" description="Required step prior to test">
+    <delete dir="resource-test/scratch" />
+  </target>
+
+  <target name="test" depends="build, test-compile, clean-pre-test">
+    <junit haltonfailure="true">
+      <classpath refid="classpath.test" />
+      <formatter type="brief" usefile="false" />
+      <batchtest>
+        <fileset dir="test">
+          <include name="**/*Test.java" />
+        </fileset>
+      </batchtest>
+    </junit>
+  </target>
+
+  <target name="compile" description="Compile">
+    <compilecommon srcdir="src" destdir="bin" classpath="classpath.base" />
+  </target>
+
+  <target name="build" depends="download-jogl, methods-build, compile"
+          description="Build core library jar">
+    <jar basedir="bin" destfile="library/core.jar" />
+  </target>
+
+  <target name="source-jar">
+    <property name="source.jar.path" location="core-sources.jar" />
+    <jar basedir="src" destfile="${source.jar.path}">
+      <fileset dir="src" includes="**/*.java" />
+    </jar>
+    <echo message="Wrote source jar to ${source.jar.path}" />
+  </target>
+
+  <target name="clean-libs" description="Clean out the JOGL binary downloads">
+    <delete>
+      <fileset dir="library" includes="gluegen-rt*.jar" />
+      <fileset dir="library" includes="jogl-all*.jar" />
+    </delete>
+
+    <!-- <antcall target="download-jogl" /> -->
+  </target>
+
+  <target name="clean" description="Clean out the build directories">
+    <delete dir="bin" />
+    <delete dir="bin-test" />
+    <delete file="library/core.jar" />
+  </target>
+
+</project>

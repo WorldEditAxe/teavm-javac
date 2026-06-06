@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Processing TeaVM Demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17202a;
+      --muted: #64717f;
+      --line: #d9e1ea;
+      --panel: #f7f9fb;
+      --accent: #1e6f9f;
+      --ok: #196f3d;
+      --warn: #9a5b00;
+      --error: #a93226;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: #ffffff;
+    }
+
+    header,
+    main {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    header {
+      padding: 28px 0 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(320px, 0.95fr) minmax(360px, 1.05fr);
+      gap: 24px;
+      padding: 24px 0 40px;
+    }
+
+    section {
+      min-width: 0;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      line-height: 1.25;
+      letter-spacing: 0;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin: 14px 0;
+    }
+
+    button {
+      min-height: 36px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      color: var(--ink);
+      padding: 0 12px;
+      font: inherit;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    button.primary {
+      border-color: var(--accent);
+      background: var(--accent);
+      color: #fff;
+    }
+
+    button:disabled {
+      cursor: progress;
+      opacity: 0.65;
+    }
+
+    processing {
+      display: block;
+      min-height: 512px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    pre {
+      margin: 0;
+      padding: 14px;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      min-height: 180px;
+      overflow: auto;
+      font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      white-space: pre;
+    }
+
+    .status {
+      min-height: 38px;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.35;
+    }
+
+    .status[data-state="ok"] {
+      color: var(--ok);
+      border-color: #b6dfc4;
+      background: #f4fbf6;
+    }
+
+    .status[data-state="warn"] {
+      color: var(--warn);
+      border-color: #efd69c;
+      background: #fff9ea;
+    }
+
+    .status[data-state="error"] {
+      color: var(--error);
+      border-color: #edb9b2;
+      background: #fff5f4;
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    @media (max-width: 820px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Processing TeaVM Demo</h1>
+    <p>Loads a PDE file, preprocesses it with Processing's compiler subset in the TeaVM compiler JavaScript library, and runs it through p5.js when the core jar is available.</p>
+  </header>
+
+  <main>
+    <section class="stack">
+      <div>
+        <h2>Asteroids Game</h2>
+        <processing
+          id="sketch"
+          sketch-name="AsteroidsGame"
+          src="./game/AsteroidsGame.pde ./game/Utils.pde ./game/Shaders.pde ./game/Star.pde ./game/Floater.pde ./game/Asteroid.pde ./game/Spaceship.pde ./game/Scenes.pde"
+        ></processing>
+      </div>
+      <div class="toolbar">
+        <button id="preprocess" type="button">Preprocess</button>
+        <button id="run" class="primary" type="button">Run sketch</button>
+      </div>
+      <div id="status" class="status">Loading demo.</div>
+    </section>
+
+    <section class="stack">
+      <div>
+        <h2>PDE Sources</h2>
+        <pre id="pde-source"></pre>
+      </div>
+      <div>
+        <h2>Generated Java</h2>
+        <pre id="java-source"></pre>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

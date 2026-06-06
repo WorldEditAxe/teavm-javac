@@ -51,6 +51,8 @@ gradle.afterProject {
     }
 }
 
+rootProject.name = "teavm-javac"
+
 include "javac"
 include "compiler"
 include "protocol"

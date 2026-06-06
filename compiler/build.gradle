@@ -30,6 +30,7 @@ dependencies {
     implementation libs.teavm.tooling
     implementation libs.teavm.rhino
     implementation libs.asm.core
+    implementation libs.antlr4.runtime
     classlibInput libs.teavm.classlib
     classlibInput libs.teavm.jso
     classlibInput libs.teavm.jso.apis
@@ -47,6 +48,12 @@ dependencies {
 }
 
 sourceSets {
+    main {
+        java {
+            // Keep project-owned compiler code separate from embedded upstream sources and local patches.
+            srcDirs "src/main/java", "src/patches/java", "src/vendor/java"
+        }
+    }
     classlibEmu {
     }
 }
@@ -181,16 +188,16 @@ def buildTeaVMClassLib = tasks.register("buildTeaVMClassLib", JavaExec) {
 }
 
 build {
-    dependsOn buildWasmGC, buildTeaVMClassLib, generateClassLib
+    dependsOn generateJavaScript, buildTeaVMClassLib, generateClassLib
 }
 
 def createDist = tasks.register("createDist", Zip) {
     group "build"
-    dependsOn buildWasmGC
+    dependsOn generateJavaScript
     from buildTeaVMClassLib
     from generateClassLib
     from "src/main/js"
-    from layout.buildDirectory.dir("generated/teavm/wasm-gc")
+    from layout.buildDirectory.dir("generated/teavm/js")
     exclude "src/**"
     archiveBaseName = "dist"
 }

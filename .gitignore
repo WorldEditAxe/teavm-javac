@@ -1,4 +1,6 @@
 .gradle
+.DS_Store
+*.hprof
 /.idea/*
 !/.idea/copyright
 !/.idea/inspectionProfiles

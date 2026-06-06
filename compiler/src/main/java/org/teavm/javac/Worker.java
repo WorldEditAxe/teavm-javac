@@ -288,6 +288,16 @@ public final class Worker {
             public JSString getModuleType() {
                 return JSString.valueOf(selectedModuleType);
             }
+
+            @Override
+            public boolean isSourceMap() {
+                return false;
+            }
+
+            @Override
+            public JSString getSourceMapName() {
+                return null;
+            }
         };
         var reg = compiler.onDiagnostic(diagnostic -> handleTeaVMDiagnostic((TeaVMDiagnostic) diagnostic, requestId));
         var result = compiler.generateJavaScript(options);
