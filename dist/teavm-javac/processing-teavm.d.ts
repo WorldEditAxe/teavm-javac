@@ -4,6 +4,7 @@ import type {
   JavaCompiler,
   ProcessingPreprocessResult,
   ProcessingSource,
+  TeaVMOptimizationLevel,
 } from "./teavm-javac.js";
 
 export interface ProcessingRunOptions {
@@ -18,6 +19,8 @@ export interface ProcessingRunOptions {
   compiler?: JavaCompiler;
   compilerOptions?: CreateCompilerOptions;
   sourceMaps?: boolean;
+  optimizationLevel?: TeaVMOptimizationLevel;
+  optimization?: TeaVMOptimizationLevel;
   sketchName?: string;
   launcherClass?: string;
 }
@@ -30,6 +33,8 @@ export interface ProcessingCompileOptions {
   compiler?: JavaCompiler;
   compilerOptions?: CreateCompilerOptions;
   sourceMaps?: boolean;
+  optimizationLevel?: TeaVMOptimizationLevel;
+  optimization?: TeaVMOptimizationLevel;
   sketchName?: string;
   launcherClass?: string;
   diagnosticsElement?: Element;

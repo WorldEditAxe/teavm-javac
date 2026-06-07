@@ -245,10 +245,12 @@ public final class Worker {
     private boolean generateOutput(CompileMessage request, String outputType, String outputName) {
         return outputType.equals(OUTPUT_TYPE_JAVASCRIPT)
                 ? generateJavaScript(request, outputName)
-                : generateWebAssembly(request.getId(), outputName);
+                : generateWebAssembly(request, outputName);
     }
 
-    private boolean generateWebAssembly(String requestId, String outputName) {
+    private boolean generateWebAssembly(CompileMessage request, String outputName) {
+        var requestId = request.getId();
+        var optimizationLevel = request.getOptimizationLevel();
         var options = new WebAssemblyCompilationOptions() {
             @Override
             public JSString getOutputName() {
@@ -258,6 +260,11 @@ public final class Worker {
             @Override
             public JSString getMainClass() {
                 return JSString.valueOf(mainClass);
+            }
+
+            @Override
+            public JSString getOptimizationLevel() {
+                return optimizationLevel != null ? JSString.valueOf(optimizationLevel) : null;
             }
         };
         var reg = compiler.onDiagnostic(diagnostic -> handleTeaVMDiagnostic((TeaVMDiagnostic) diagnostic, requestId));
@@ -273,6 +280,7 @@ public final class Worker {
             moduleType = DEFAULT_JAVASCRIPT_MODULE_TYPE;
         }
         var selectedModuleType = moduleType;
+        var optimizationLevel = request.getOptimizationLevel();
         var options = new JavaScriptCompilationOptions() {
             @Override
             public JSString getOutputName() {
@@ -297,6 +305,11 @@ public final class Worker {
             @Override
             public JSString getSourceMapName() {
                 return null;
+            }
+
+            @Override
+            public JSString getOptimizationLevel() {
+                return optimizationLevel != null ? JSString.valueOf(optimizationLevel) : null;
             }
         };
         var reg = compiler.onDiagnostic(diagnostic -> handleTeaVMDiagnostic((TeaVMDiagnostic) diagnostic, requestId));

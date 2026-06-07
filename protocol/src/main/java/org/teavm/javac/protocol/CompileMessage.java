@@ -42,4 +42,10 @@ public interface CompileMessage extends WorkerMessage {
 
     @JSProperty
     void setModuleType(String moduleType);
+
+    @JSProperty
+    String getOptimizationLevel();
+
+    @JSProperty
+    void setOptimizationLevel(String optimizationLevel);
 }

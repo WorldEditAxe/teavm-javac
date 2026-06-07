@@ -31,10 +31,14 @@ import processing.core.PConstants;
 import processing.core.PGraphics;
 import processing.core.PImage;
 import processing.core.PSurfaceNone;
+import processing.event.KeyEvent;
+import processing.event.MouseEvent;
 
 public class P5Surface extends PSurfaceNone {
   private JSObject renderer;
   private P5Bridge.AnimationFrameCallback frameCallback;
+  private P5Bridge.MouseInputCallback mouseInputCallback;
+  private P5Bridge.KeyInputCallback keyInputCallback;
   private double frameRequest = -1;
   private double lastFrameMillis = -1;
   private boolean running;
@@ -68,6 +72,9 @@ public class P5Surface extends PSurfaceNone {
     P5Bridge.noLoop(p5());
     renderer = P5Bridge.createCanvas(p5(), sketch.sketchWidth(), sketch.sketchHeight());
     graphics.setSize(sketch.sketchWidth(), sketch.sketchHeight());
+    mouseInputCallback = this::postMouseEvent;
+    keyInputCallback = this::postKeyEvent;
+    P5Bridge.installInputHandlers(p5(), renderer, mouseInputCallback, keyInputCallback);
   }
 
 
@@ -235,6 +242,18 @@ public class P5Surface extends PSurfaceNone {
       lastFrameMillis = timeMillis;
     }
     frameRequest = P5Bridge.requestAnimationFrame(frameCallback);
+  }
+
+
+  private void postMouseEvent(JSObject nativeEvent, double millis, int action, int modifiers,
+                              int x, int y, int button, int count) {
+    sketch.postEvent(new MouseEvent(nativeEvent, (long) millis, action, modifiers, x, y, button, count));
+  }
+
+
+  private void postKeyEvent(JSObject nativeEvent, double millis, int action, int modifiers,
+                            int key, int keyCode, boolean repeat) {
+    sketch.postEvent(new KeyEvent(nativeEvent, (long) millis, action, modifiers, (char) key, keyCode, repeat));
   }
 
 

@@ -36,6 +36,130 @@ final class P5Bridge {
   }
 
 
+  @JSFunctor
+  interface MouseInputCallback extends JSObject {
+    void call(JSObject nativeEvent, double millis, int action, int modifiers,
+              int x, int y, int button, int count);
+  }
+
+
+  @JSFunctor
+  interface KeyInputCallback extends JSObject {
+    void call(JSObject nativeEvent, double millis, int action, int modifiers,
+              int key, int keyCode, boolean repeat);
+  }
+
+
+  @JSBody(params = { "p5", "renderer", "mouseCallback", "keyCallback" }, script =
+    "var target = renderer || p5;" +
+    "var canvas = target && target.canvas ? target.canvas : target && target.elt ? target.elt : null;" +
+    "if (!canvas && p5 && p5.canvas) canvas = p5.canvas;" +
+    "if (!canvas && p5 && p5._renderer && p5._renderer.canvas) canvas = p5._renderer.canvas;" +
+    "if (!canvas || canvas.__processingTeaVMInputInstalled) return;" +
+    "canvas.__processingTeaVMInputInstalled = true;" +
+    "canvas.tabIndex = canvas.tabIndex >= 0 ? canvas.tabIndex : 0;" +
+    "canvas.style.outline = canvas.style.outline || 'none';" +
+    "var LEFT = 37, CENTER = 3, RIGHT = 39, CODED = 65535;" +
+    "var MOUSE_PRESS = 1, MOUSE_RELEASE = 2, MOUSE_CLICK = 3, MOUSE_DRAG = 4, MOUSE_MOVE = 5, MOUSE_WHEEL = 8;" +
+    "var KEY_PRESS = 1, KEY_RELEASE = 2, KEY_TYPE = 3;" +
+    "function millis() {" +
+    "  return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();" +
+    "}" +
+    "function modifiers(ev) {" +
+    "  var value = 0;" +
+    "  if (ev.shiftKey) value |= 1;" +
+    "  if (ev.ctrlKey) value |= 2;" +
+    "  if (ev.metaKey) value |= 4;" +
+    "  if (ev.altKey) value |= 8;" +
+    "  return value;" +
+    "}" +
+    "function button(ev) {" +
+    "  return ev.button === 1 ? CENTER : ev.button === 2 ? RIGHT : LEFT;" +
+    "}" +
+    "function position(ev) {" +
+    "  var rect = canvas.getBoundingClientRect();" +
+    "  var density = 1;" +
+    "  if (p5 && typeof p5.pixelDensity === 'function') {" +
+    "    var candidateDensity = p5.pixelDensity();" +
+    "    if (isFinite(candidateDensity) && candidateDensity > 0) density = candidateDensity;" +
+    "  } else if (typeof window !== 'undefined' && window.devicePixelRatio) {" +
+    "    density = window.devicePixelRatio;" +
+    "  }" +
+    "  var logicalWidth = p5 && p5.width ? p5.width : canvas.width / density;" +
+    "  var logicalHeight = p5 && p5.height ? p5.height : canvas.height / density;" +
+    "  var scaleX = rect.width ? logicalWidth / rect.width : 1;" +
+    "  var scaleY = rect.height ? logicalHeight / rect.height : 1;" +
+    "  return {" +
+    "    x: Math.round((ev.clientX - rect.left) * scaleX)," +
+    "    y: Math.round((ev.clientY - rect.top) * scaleY)" +
+    "  };" +
+    "}" +
+    "function emitMouse(ev, action, count) {" +
+    "  if (!mouseCallback) return;" +
+    "  var pos = position(ev);" +
+    "  mouseCallback(ev, millis(), action, modifiers(ev), pos.x, pos.y, button(ev), count || ev.detail || 0);" +
+    "}" +
+    "function keyData(ev) {" +
+    "  var named = {" +
+    "    ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40," +
+    "    Alt: 18, Control: 17, Shift: 16, Meta: 157," +
+    "    Backspace: 8, Tab: 9, Enter: 10, Escape: 27, Delete: 127" +
+    "  };" +
+    "  var code = named[ev.key];" +
+    "  if (code) return { key: CODED, keyCode: code };" +
+    "  if (ev.key === ' ') return { key: 32, keyCode: 32 };" +
+    "  if (ev.key && ev.key.length === 1) {" +
+    "    return { key: ev.key.charCodeAt(0), keyCode: ev.key.toUpperCase().charCodeAt(0) };" +
+    "  }" +
+    "  return { key: 0, keyCode: ev.keyCode || ev.which || 0 };" +
+    "}" +
+    "function isSketchKey(ev) {" +
+    "  return ev.key === ' ' || ev.key === 'Tab' || ev.key === 'Backspace' || ev.key === 'Delete' ||" +
+    "    ev.key === 'ArrowLeft' || ev.key === 'ArrowRight' || ev.key === 'ArrowUp' || ev.key === 'ArrowDown' ||" +
+    "    /^[a-zA-Z0-9]$/.test(ev.key || '');" +
+    "}" +
+    "function emitKey(ev, action) {" +
+    "  if (!keyCallback) return;" +
+    "  var data = keyData(ev);" +
+    "  keyCallback(ev, millis(), action, modifiers(ev), data.key, data.keyCode, !!ev.repeat);" +
+    "  if (isSketchKey(ev) && typeof ev.preventDefault === 'function') ev.preventDefault();" +
+    "}" +
+    "canvas.addEventListener('mousedown', function(ev) {" +
+    "  canvas.focus();" +
+    "  emitMouse(ev, MOUSE_PRESS, ev.detail || 1);" +
+    "  if (typeof ev.preventDefault === 'function') ev.preventDefault();" +
+    "});" +
+    "canvas.addEventListener('mousemove', function(ev) {" +
+    "  emitMouse(ev, ev.buttons ? MOUSE_DRAG : MOUSE_MOVE, 0);" +
+    "});" +
+    "canvas.addEventListener('click', function(ev) {" +
+    "  emitMouse(ev, MOUSE_CLICK, ev.detail || 1);" +
+    "});" +
+    "canvas.addEventListener('wheel', function(ev) {" +
+    "  var count = ev.deltaY < 0 ? -1 : ev.deltaY > 0 ? 1 : 0;" +
+    "  emitMouse(ev, MOUSE_WHEEL, count);" +
+    "  if (typeof ev.preventDefault === 'function') ev.preventDefault();" +
+    "}, { passive: false });" +
+    "canvas.addEventListener('contextmenu', function(ev) {" +
+    "  if (typeof ev.preventDefault === 'function') ev.preventDefault();" +
+    "});" +
+    "window.addEventListener('mouseup', function(ev) {" +
+    "  emitMouse(ev, MOUSE_RELEASE, ev.detail || 1);" +
+    "});" +
+    "canvas.addEventListener('keydown', function(ev) {" +
+    "  emitKey(ev, KEY_PRESS);" +
+    "});" +
+    "canvas.addEventListener('keyup', function(ev) {" +
+    "  emitKey(ev, KEY_RELEASE);" +
+    "});" +
+    "canvas.addEventListener('keypress', function(ev) {" +
+    "  emitKey(ev, KEY_TYPE);" +
+    "});")
+  static native void installInputHandlers(JSObject p5, JSObject renderer,
+                                          MouseInputCallback mouseCallback,
+                                          KeyInputCallback keyCallback);
+
+
   @JSBody(params = { }, script = "return Date.now();")
   static native double dateNow();
 

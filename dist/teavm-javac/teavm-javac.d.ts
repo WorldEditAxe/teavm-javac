@@ -1,4 +1,5 @@
 export type BinaryInput = string | URL | ArrayBuffer | ArrayBufferView | Int8Array;
+export type TeaVMOptimizationLevel = "simple" | "advanced" | "full" | "SIMPLE" | "ADVANCED" | "FULL";
 
 export interface CompilerClasslibOptions {
   javac?: BinaryInput;
@@ -102,6 +103,8 @@ export interface EmitWasmOptions {
   name?: string;
   outputName?: string;
   mainClass: string;
+  optimizationLevel?: TeaVMOptimizationLevel;
+  optimization?: TeaVMOptimizationLevel;
 }
 
 export interface EmitWasmResult {
@@ -121,6 +124,8 @@ export interface EmitJsOptions {
   sourceMap?: boolean;
   sourceMaps?: boolean;
   sourceMapName?: string;
+  optimizationLevel?: TeaVMOptimizationLevel;
+  optimization?: TeaVMOptimizationLevel;
 }
 
 export interface EmitJsResult {

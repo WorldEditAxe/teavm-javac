@@ -468,10 +468,11 @@ public final class Compiler {
     public boolean generateWebAssembly(WebAssemblyCompilationOptions options) {
         var outputName = getOptionalString(options.getOutputName(), "app");
         var mainClass = getRequiredString(options.getMainClass(), "Main class");
+        var optimizationLevel = getOptimizationLevel(options.getOptimizationLevel());
 
         var target = new WasmGCTarget();
         var refCache = new ReferenceCache();
-        var teavm = createTeaVM(target, refCache);
+        var teavm = createTeaVM(target, refCache, optimizationLevel);
         teavm.setEntryPoint(mainClass);
         target.setObfuscated(false);
         target.setDebugInfoLocation(WasmDebugInfoLocation.EMBEDDED);
@@ -486,6 +487,7 @@ public final class Compiler {
         var mainClass = getRequiredString(options.getMainClass(), "Main class");
         var sourceMap = options.isSourceMap();
         var sourceMapName = getOptionalString(options.getSourceMapName(), outputName + ".map");
+        var optimizationLevel = getOptimizationLevel(options.getOptimizationLevel());
 
         var target = new JavaScriptTarget();
         var refCache = new ReferenceCache();
@@ -494,7 +496,7 @@ public final class Compiler {
             debugInformationBuilder = new DebugInformationBuilder(refCache);
             target.setDebugEmitter(debugInformationBuilder);
         }
-        var teavm = createTeaVM(target, refCache);
+        var teavm = createTeaVM(target, refCache, optimizationLevel);
         teavm.setEntryPoint(mainClass);
         target.setObfuscated(false);
         target.setModuleType(getModuleType(options.getModuleType()));
@@ -526,7 +528,8 @@ public final class Compiler {
         }
     }
 
-    private TeaVM createTeaVM(TeaVMTarget target, ReferenceCache refCache) {
+    private TeaVM createTeaVM(TeaVMTarget target, ReferenceCache refCache,
+            TeaVMOptimizationLevel optimizationLevel) {
         if (classSource == null) {
             resourceProvider = new MemoryResourceProvider(List.of(teavmClasslibFiles, classFiles, outputFiles));
             classSource = new ClasspathClassHolderSource(resourceProvider, refCache);
@@ -542,7 +545,7 @@ public final class Compiler {
                 .setObfuscated(true)
                 .setStrict(true)
                 .build();
-        teavm.setOptimizationLevel(TeaVMOptimizationLevel.ADVANCED);
+        teavm.setOptimizationLevel(optimizationLevel);
         new PlatformPlugin().install(teavm);
         new JSOPlugin().install(teavm);
         if (target instanceof JavaScriptTarget javaScriptTarget) {
@@ -710,6 +713,17 @@ public final class Compiler {
             return JSModuleType.valueOf(normalized);
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("Unsupported JavaScript module type: " + moduleType);
+        }
+    }
+
+    private static TeaVMOptimizationLevel getOptimizationLevel(JSString value) {
+        var optimizationLevel = getOptionalString(value, TeaVMOptimizationLevel.SIMPLE.name());
+        var normalized = optimizationLevel.replace('-', '_').toUpperCase(Locale.ROOT);
+        try {
+            return TeaVMOptimizationLevel.valueOf(normalized);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Unsupported TeaVM optimization level: " + optimizationLevel
+                    + ". Supported levels are SIMPLE, ADVANCED, and FULL.");
         }
     }
 

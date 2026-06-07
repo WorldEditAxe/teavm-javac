@@ -113,6 +113,7 @@ async function emitAndRunJs(compiled, element, options) {
     fileName: DEFAULT_JS_FILE,
     sourceMap: options.sourceMaps !== false,
     sourceMapName,
+    optimizationLevel: options.optimizationLevel ?? options.optimization,
   });
 
   if (!emitted.ok || !emitted.text) {

@@ -162,6 +162,7 @@ export class JavaCompiler {
     const ok = this.raw.generateWebAssembly({
       outputName,
       mainClass: required(options.mainClass, "mainClass"),
+      optimizationLevel: normalizeOptimizationLevel(options.optimizationLevel ?? options.optimization ?? "simple"),
     });
     const bytes = ok ? this.wasm.get(fileName) : null;
 
@@ -183,6 +184,7 @@ export class JavaCompiler {
       moduleType: normalizeModule(options.module ?? options.moduleType ?? "umd"),
       sourceMap,
       sourceMapName,
+      optimizationLevel: normalizeOptimizationLevel(options.optimizationLevel ?? options.optimization ?? "simple"),
     });
     const bytes = ok ? this.js.get(fileName) : null;
     const sourceMapBytes = ok && sourceMap ? this.js.get(sourceMapName) : null;
@@ -359,6 +361,20 @@ function normalizeModule(module) {
       return "UMD";
     default:
       return String(module);
+  }
+}
+
+function normalizeOptimizationLevel(level) {
+  const normalized = String(level).toLowerCase().replaceAll("-", "_");
+  switch (normalized) {
+    case "simple":
+      return "SIMPLE";
+    case "advanced":
+      return "ADVANCED";
+    case "full":
+      return "FULL";
+    default:
+      return String(level);
   }
 }
 

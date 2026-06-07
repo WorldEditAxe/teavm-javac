@@ -35,4 +35,7 @@ public interface JavaScriptCompilationOptions extends JSObject {
 
     @JSProperty
     JSString getSourceMapName();
+
+    @JSProperty
+    JSString getOptimizationLevel();
 }
