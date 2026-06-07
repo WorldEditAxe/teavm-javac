@@ -20,6 +20,30 @@ See [docs/REPOSITORY_STRUCTURE.md](docs/REPOSITORY_STRUCTURE.md) for the module 
 
 If you're too lazy to build, the `dist` folder comes with a build ready for use.
 
+The distribution is npm/package-manager ready. It ships ESM modules plus first-class
+TypeScript declarations through `package.json` exports:
+
+```ts
+import { createCompiler } from "@worldeditaxe/teavm-javac";
+import { runProcessingElement } from "@worldeditaxe/teavm-javac/processing";
+```
+
+The Processing browser runner compiles and emits sketch JavaScript in a module
+worker by default so code generation does not block the UI thread. Pass
+`{ worker: false }` to force the old main-thread path, or pass `workerUrl` to host
+`processing-teavm-worker.js` somewhere else. Sketch codegen defaults to TeaVM
+`"simple"` optimization unless `optimizationLevel`/`optimization` is supplied.
+Pass `fastGlobalAnalysis: true` to use TeaVM's fast dependency/global analysis
+path for sketch emit. This mirrors TeaVMTool's fast dependency mode, so the
+compiler backend uses `SIMPLE` optimization while that mode is enabled.
+
+Sketches run through the p5.js-compatible backend by default. To skip p5 and
+draw directly to a browser `CanvasRenderingContext2D`, pass
+`{ backend: "canvas2d" }` to `runProcessingElement`/`runProcessingSketches` or
+set `backend="canvas2d"` on a `<processing>` element. The direct backend covers
+the core 2D path: canvas creation/resizing, drawing primitives, shapes, text,
+transforms, pixels, cursor updates, and mouse/keyboard input.
+
 The preferred API is the ES module wrapper in `teavm-javac.js`:
 
 ```js
@@ -105,6 +129,8 @@ declare class JavaCompiler {
     outputName?: string;
     optimizationLevel?: "simple" | "advanced" | "full";
     optimization?: "simple" | "advanced" | "full";
+    fastGlobalAnalysis?: boolean;
+    fastDependencyAnalysis?: boolean;
   }): {
     ok: boolean;
     fileName: string;
@@ -119,6 +145,10 @@ declare class JavaCompiler {
     outputName?: string;
     module?: "umd" | "commonjs" | "cjs" | "esm" | "es2015" | "script" | "none";
     moduleType?: string;
+    optimizationLevel?: "simple" | "advanced" | "full";
+    optimization?: "simple" | "advanced" | "full";
+    fastGlobalAnalysis?: boolean;
+    fastDependencyAnalysis?: boolean;
   }): {
     ok: boolean;
     fileName: string;
@@ -221,6 +251,8 @@ upon completion, and
     target: "webassembly" | "javascript" | "js", // optional, defaults to WebAssembly
     outputName: string, // optional; JS defaults to "classes.js", Wasm defaults to "app"
     moduleType: "COMMON_JS" | "UMD" | "NONE" | "ES2015" // optional for JS, defaults to "UMD"
+    optimizationLevel: "SIMPLE" | "ADVANCED" | "FULL", // optional, defaults to SIMPLE
+    fastGlobalAnalysis: boolean // optional, defaults to false
 }
 ```
 

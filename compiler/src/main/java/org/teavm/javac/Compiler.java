@@ -52,6 +52,7 @@ import org.teavm.classlib.java.lang.SystemDependencyPlugin;
 import org.teavm.classlib.java.lang.SystemNativeGenerator;
 import org.teavm.debugging.information.DebugInformationBuilder;
 import org.teavm.debugging.information.SourceMapsWriter;
+import org.teavm.dependency.FastDependencyAnalyzer;
 import org.teavm.jso.JSClass;
 import org.teavm.jso.JSExport;
 import org.teavm.jso.core.JSObjects;
@@ -469,10 +470,11 @@ public final class Compiler {
         var outputName = getOptionalString(options.getOutputName(), "app");
         var mainClass = getRequiredString(options.getMainClass(), "Main class");
         var optimizationLevel = getOptimizationLevel(options.getOptimizationLevel());
+        var fastGlobalAnalysis = options.isFastGlobalAnalysis();
 
         var target = new WasmGCTarget();
         var refCache = new ReferenceCache();
-        var teavm = createTeaVM(target, refCache, optimizationLevel);
+        var teavm = createTeaVM(target, refCache, optimizationLevel, fastGlobalAnalysis);
         teavm.setEntryPoint(mainClass);
         target.setObfuscated(false);
         target.setDebugInfoLocation(WasmDebugInfoLocation.EMBEDDED);
@@ -488,6 +490,7 @@ public final class Compiler {
         var sourceMap = options.isSourceMap();
         var sourceMapName = getOptionalString(options.getSourceMapName(), outputName + ".map");
         var optimizationLevel = getOptimizationLevel(options.getOptimizationLevel());
+        var fastGlobalAnalysis = options.isFastGlobalAnalysis();
 
         var target = new JavaScriptTarget();
         var refCache = new ReferenceCache();
@@ -496,7 +499,7 @@ public final class Compiler {
             debugInformationBuilder = new DebugInformationBuilder(refCache);
             target.setDebugEmitter(debugInformationBuilder);
         }
-        var teavm = createTeaVM(target, refCache, optimizationLevel);
+        var teavm = createTeaVM(target, refCache, optimizationLevel, fastGlobalAnalysis);
         teavm.setEntryPoint(mainClass);
         target.setObfuscated(false);
         target.setModuleType(getModuleType(options.getModuleType()));
@@ -529,7 +532,7 @@ public final class Compiler {
     }
 
     private TeaVM createTeaVM(TeaVMTarget target, ReferenceCache refCache,
-            TeaVMOptimizationLevel optimizationLevel) {
+            TeaVMOptimizationLevel optimizationLevel, boolean fastGlobalAnalysis) {
         if (classSource == null) {
             resourceProvider = new MemoryResourceProvider(List.of(teavmClasslibFiles, classFiles, outputFiles));
             classSource = new ClasspathClassHolderSource(resourceProvider, refCache);
@@ -538,14 +541,17 @@ public final class Compiler {
                 resourceProvider);
         var currentClassSource = new CompositeClassHolderSource(List.of(
                 new ClasspathClassHolderSource(currentResourceProvider, refCache), classSource));
-        var teavm = new TeaVMBuilder(target)
+        var builder = new TeaVMBuilder(target)
                 .setClassSource(currentClassSource)
                 .setResourceProvider(currentResourceProvider)
                 .setReferenceCache(refCache)
                 .setObfuscated(true)
-                .setStrict(true)
-                .build();
-        teavm.setOptimizationLevel(optimizationLevel);
+                .setStrict(true);
+        if (fastGlobalAnalysis) {
+            builder.setDependencyAnalyzerFactory(FastDependencyAnalyzer::new);
+        }
+        var teavm = builder.build();
+        teavm.setOptimizationLevel(fastGlobalAnalysis ? TeaVMOptimizationLevel.SIMPLE : optimizationLevel);
         new PlatformPlugin().install(teavm);
         new JSOPlugin().install(teavm);
         if (target instanceof JavaScriptTarget javaScriptTarget) {

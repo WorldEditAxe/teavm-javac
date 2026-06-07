@@ -48,4 +48,10 @@ public interface CompileMessage extends WorkerMessage {
 
     @JSProperty
     void setOptimizationLevel(String optimizationLevel);
+
+    @JSProperty
+    boolean isFastGlobalAnalysis();
+
+    @JSProperty
+    void setFastGlobalAnalysis(boolean fastGlobalAnalysis);
 }

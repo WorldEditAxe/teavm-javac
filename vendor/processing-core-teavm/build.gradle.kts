@@ -1,9 +1,5 @@
-import com.vanniktech.maven.publish.SonatypeHost
-
 plugins {
     id("java")
-    kotlin("jvm") version libs.versions.kotlin
-    alias(libs.plugins.mavenPublish)
 }
 
 repositories {
@@ -15,6 +11,15 @@ sourceSets{
     main{
         java{
             srcDirs("src")
+            include(
+                "processing/core/*.java",
+                "processing/data/*.java",
+                "processing/event/*.java",
+                "processing/opengl/PGL.java",
+                "processing/opengl/PShader.java",
+                "processing/platform/core/*.java",
+                "processing/platform/teavm/*.java"
+            )
             exclude("**/*.jnilib")
         }
         resources{
@@ -30,43 +35,10 @@ sourceSets{
 }
 
 dependencies {
-    implementation(libs.jogl)
-    implementation(libs.gluegen)
-    compileOnly(libs.teavm.jso)
+    implementation(files("library/jogl-all.jar", "library/gluegen-rt.jar"))
+    compileOnly("org.teavm:teavm-jso:0.14.1")
 
-    testImplementation(libs.junit)
-}
-
-mavenPublishing{
-    publishToMavenCentral(SonatypeHost.CENTRAL_PORTAL, automaticRelease = true)
-    signAllPublications()
-
-    pom{
-        name.set("Processing Core")
-        description.set("Processing Core")
-        url.set("https://processing.org")
-        licenses {
-            license {
-                name.set("LGPL")
-                url.set("https://www.gnu.org/licenses/lgpl-2.1.html")
-            }
-        }
-        developers {
-            developer {
-                id.set("steftervelde")
-                name.set("Stef Tervelde")
-            }
-            developer {
-                id.set("benfry")
-                name.set("Ben Fry")
-            }
-        }
-        scm{
-            url.set("https://github.com/processing/processing4")
-            connection.set("scm:git:git://github.com/processing/processing4.git")
-            developerConnection.set("scm:git:ssh://git@github.com/processing/processing4.git")
-        }
-    }
+    testImplementation("junit:junit:4.13.2")
 }
 
 
@@ -75,6 +47,8 @@ tasks.test {
 }
 tasks.withType<Jar> {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    archiveFileName.set("processing-core-teavm.jar")
+    destinationDirectory.set(layout.buildDirectory)
 }
 tasks.compileJava{
     options.encoding = "UTF-8"

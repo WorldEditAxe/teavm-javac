@@ -30,7 +30,6 @@ import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.text.*;
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.regex.*;
 import java.util.zip.*;
 
@@ -1265,7 +1264,7 @@ public class PApplet implements PConstants {
 
 
   /** Map of registered methods, stored by method name. */
-  Map<String, RegisteredMethods> registerMap = new ConcurrentHashMap<>();
+  Map<String, RegisteredMethods> registerMap = new HashMap<>();
 
 
   class RegisteredMethods {
@@ -1274,13 +1273,13 @@ public class PApplet implements PConstants {
      * This is an ordered collection because the order of calls
      * likely matters, or at a minimum, needs to be stable.
      */
-    Queue<Object> entries = new ConcurrentLinkedQueue<>();
+    Queue<Object> entries = new ArrayDeque<>();
 
     /**
      * A reference to the Method inside each Object, stored so that we're
      * not redoing the same reflection call inside a tight loop like draw().
      */
-    Map<Object, Method> methods = new ConcurrentHashMap<>();
+    Map<Object, Method> methods = new HashMap<>();
 
     /** While handle() is being called, store any removals in this Set. */
     Set<Object> removals = null;
@@ -1297,7 +1296,7 @@ public class PApplet implements PConstants {
       // Queue removed entries until done iterating, i.e. so the Video Library
       // can call unregisterMethod("dispose") from inside its dispose() method
       // https://github.com/processing/processing4/pull/199
-      removals = ConcurrentHashMap.newKeySet();
+      removals = new HashSet<>();
 
       for (Object entry : entries) {
         try {
@@ -5077,8 +5076,6 @@ public class PApplet implements PConstants {
 
 
   static private final String REQUEST_IMAGE_THREAD_PREFIX = "requestImage";
-  // fixed-size thread pool used by requestImage()
-  ExecutorService requestImagePool;
 
 
   public PImage requestImage(String filename) {
@@ -5117,32 +5114,14 @@ public class PApplet implements PConstants {
     if (g != null) {
       g.awaitAsyncSaveCompletion(filename);
     }
-    PImage vessel = createImage(0, 0, ARGB);
-
-    // if the image loading thread pool hasn't been created, create it
-    if (requestImagePool == null) {
-      ThreadFactory factory = r -> new Thread(r, REQUEST_IMAGE_THREAD_PREFIX);
-      requestImagePool = Executors.newFixedThreadPool(4, factory);
+    PImage actual = loadImage(filename, extension);
+    if (actual != null) {
+      return actual;
     }
-    requestImagePool.execute(() -> {
-      PImage actual = loadImage(filename, extension);
 
-      // An error message should have already printed
-      if (actual == null) {
-        vessel.width = -1;
-        vessel.height = -1;
-
-      } else {
-        vessel.width = actual.width;
-        vessel.height = actual.height;
-        vessel.format = actual.format;
-        vessel.pixels = actual.pixels;
-
-        vessel.pixelWidth = actual.width;
-        vessel.pixelHeight = actual.height;
-        vessel.pixelDensity = 1;
-      }
-    });
+    PImage vessel = createImage(0, 0, ARGB);
+    vessel.width = -1;
+    vessel.height = -1;
     return vessel;
   }
 
@@ -9562,7 +9541,7 @@ public class PApplet implements PConstants {
 
   // WINDOW METHODS
 
-  Map<String, WindowEventValuePairs> windowEventQueue = new ConcurrentHashMap<>();
+  Map<String, WindowEventValuePairs> windowEventQueue = new HashMap<>();
 
 
   public void windowTitle(String title) {

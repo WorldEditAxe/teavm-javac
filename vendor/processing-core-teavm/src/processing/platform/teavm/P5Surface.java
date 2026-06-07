@@ -70,7 +70,8 @@ public class P5Surface extends PSurfaceNone {
   public void initFrame(PApplet sketch) {
     this.sketch = sketch;
     P5Bridge.noLoop(p5());
-    renderer = P5Bridge.createCanvas(p5(), sketch.sketchWidth(), sketch.sketchHeight());
+    boolean webgl = graphics instanceof PGraphicsP5 && ((PGraphicsP5) graphics).isWebGL();
+    renderer = P5Bridge.createCanvas(p5(), sketch.sketchWidth(), sketch.sketchHeight(), webgl);
     graphics.setSize(sketch.sketchWidth(), sketch.sketchHeight());
     mouseInputCallback = this::postMouseEvent;
     keyInputCallback = this::postKeyEvent;
@@ -238,10 +239,22 @@ public class P5Surface extends PSurfaceNone {
     }
 
     if (!paused && shouldDraw(timeMillis)) {
+      syncMousePosition();
       sketch.handleDraw();
       lastFrameMillis = timeMillis;
     }
     frameRequest = P5Bridge.requestAnimationFrame(frameCallback);
+  }
+
+
+  private void syncMousePosition() {
+    JSObject currentP5 = p5();
+    int x = P5Bridge.mouseX(currentP5);
+    int y = P5Bridge.mouseY(currentP5);
+    sketch.mouseX = x;
+    sketch.mouseY = y;
+    sketch.rmouseX = x;
+    sketch.rmouseY = y;
   }
 
 

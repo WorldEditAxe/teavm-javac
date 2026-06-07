@@ -43,8 +43,8 @@ public final class P5Platform {
       throw new NullPointerException("p5Instance");
     }
     p5 = p5Instance;
-    P5Bridge.noLoop(p5Instance);
     PlatformRuntimeProvider.set(new P5PlatformRuntime(p5Instance));
+    P5Bridge.noLoop(p5Instance);
   }
 
 

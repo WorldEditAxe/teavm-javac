@@ -28,15 +28,6 @@ package processing.core;
 import java.io.File;
 import java.util.Map;
 import java.util.HashMap;
-import java.util.WeakHashMap;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.TimeUnit;
 
 import processing.opengl.PGL;
 import processing.opengl.PShader;
@@ -201,8 +192,8 @@ public class PGraphics extends PImage implements PConstants {
    * map that points at any of the images it has worked on already. When the
    * images go out of scope, they will be properly garbage collected.
    */
-  protected WeakHashMap<PImage, Object> cacheMap =
-    new WeakHashMap<>();
+  protected HashMap<PImage, Object> cacheMap =
+    new HashMap<>();
 
 
   ////////////////////////////////////////////////////////////
@@ -8462,36 +8453,15 @@ public class PGraphics extends PImage implements PConstants {
     static final int TARGET_COUNT =
         Math.max(1, PlatformRuntimeProvider.get().availableProcessors() - 1);
 
-    BlockingQueue<PImage> targetPool = new ArrayBlockingQueue<>(TARGET_COUNT);
-    ExecutorService saveExecutor = Executors.newFixedThreadPool(TARGET_COUNT);
-
-    int targetsCreated = 0;
-
-    Map<File, Future<?>> runningTasks = new HashMap<>();
-    final Object runningTasksLock = new Object();
-
-
-    static final int TIME_AVG_FACTOR = 32;
-
-    volatile long avgNanos = 0;
-    long lastTime = 0;
-    int lastFrameCount = 0;
-
-
     public AsyncImageSaver() { } // ignore
 
 
     public void dispose() { // ignore
-      saveExecutor.shutdown();
-      try {
-        //noinspection ResultOfMethodCallIgnored
-        saveExecutor.awaitTermination(5000, TimeUnit.SECONDS);
-      } catch (InterruptedException ignored) { }
     }
 
 
     public boolean hasAvailableTarget() { // ignore
-      return targetsCreated < TARGET_COUNT || targetPool.isEmpty();
+      return true;
     }
 
 
@@ -8501,102 +8471,25 @@ public class PGraphics extends PImage implements PConstants {
      */
     public PImage getAvailableTarget(int requestedWidth, int requestedHeight, // ignore
                                      int format) {
-      try {
-        PImage target;
-        if (targetsCreated < TARGET_COUNT && targetPool.isEmpty()) {
-          target = new PImage(requestedWidth, requestedHeight);
-          targetsCreated++;
-        } else {
-          target = targetPool.take();
-          if (target.pixelWidth != requestedWidth ||
-              target.pixelHeight != requestedHeight) {
-            // TODO: this kills performance when saving different sizes
-            target = new PImage(requestedWidth, requestedHeight);
-          }
-        }
-        target.format = format;
-        return target;
-      } catch (InterruptedException e) {
-        return null;
-      }
+      PImage target = new PImage(requestedWidth, requestedHeight);
+      target.format = format;
+      return target;
     }
 
 
     public void returnUnusedTarget(PImage target) { // ignore
-      targetPool.offer(target);
     }
 
 
     public void saveTargetAsync(final PGraphics renderer, final PImage target, // ignore
                                 final File file) {
       target.parent = renderer.parent;
-
-      // if running every frame, smooth the frame rate
-      if (target.parent.frameCount - 1 == lastFrameCount && TARGET_COUNT > 1) {
-
-        // count with one less thread to reduce jitter
-        // 2 cores - 1 save thread - no wait
-        // 4 cores - 3 save threads - wait 1/2 of save time
-        // 8 cores - 7 save threads - wait 1/6 of save time
-        long avgTimePerFrame = avgNanos / (Math.max(1, TARGET_COUNT - 1));
-        long now = PlatformRuntimeProvider.get().nanoTime();
-        long delay = PApplet.round((lastTime + avgTimePerFrame - now) / 1e6f);
-        try {
-          if (delay > 0) Thread.sleep(delay);
-        } catch (InterruptedException ignored) { }
-      }
-
-      lastFrameCount = target.parent.frameCount;
-      lastTime = PlatformRuntimeProvider.get().nanoTime();
-
-      awaitAsyncSaveCompletion(file);
-
-      // Explicit lock, because submitting a task and putting it into map
-      // has to be atomic (and happen before task tries to remove itself)
-      synchronized (runningTasksLock) {
-        try {
-          Future<?> task = saveExecutor.submit(() -> {
-            try {
-              long startTime = PlatformRuntimeProvider.get().nanoTime();
-              renderer.processImageBeforeAsyncSave(target);
-              target.save(file.getAbsolutePath());
-              long saveNanos = PlatformRuntimeProvider.get().nanoTime() - startTime;
-              synchronized (AsyncImageSaver.this) {
-                if (avgNanos == 0) {
-                  avgNanos = saveNanos;
-                } else if (saveNanos < avgNanos) {
-                  avgNanos = (avgNanos * (TIME_AVG_FACTOR - 1) + saveNanos) /
-                      (TIME_AVG_FACTOR);
-                } else {
-                  avgNanos = saveNanos;
-                }
-              }
-            } finally {
-              targetPool.offer(target);
-              synchronized (runningTasksLock) {
-                runningTasks.remove(file);
-              }
-            }
-          });
-          runningTasks.put(file, task);
-        } catch (RejectedExecutionException e) {
-          // the executor service was probably shut down, no more saving for us
-        }
-      }
+      renderer.processImageBeforeAsyncSave(target);
+      target.save(file.getAbsolutePath());
     }
 
 
     public void awaitAsyncSaveCompletion(final File file) { // ignore
-      Future<?> taskWithSameFilename;
-      synchronized (runningTasksLock) {
-        taskWithSameFilename = runningTasks.get(file);
-      }
-
-      if (taskWithSameFilename != null) {
-        try {
-          taskWithSameFilename.get();
-        } catch (InterruptedException | ExecutionException ignored) { }
-      }
     }
 
   }

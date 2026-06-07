@@ -7,12 +7,20 @@ import type {
   TeaVMOptimizationLevel,
 } from "./teavm-javac.js";
 
+export type ProcessingSketchBackend = "p5" | "p5js" | "canvas" | "canvas2d" | "direct-canvas" | "direct-canvas2d";
+export type ProcessingOutputTarget = "auto" | "best" | "default" | "js" | "javascript" | "esm" | "wasm" | "webassembly" | "wasm-gc" | "wasmgc";
+
 export interface ProcessingRunOptions {
   root?: ParentNode;
   selector?: string;
-  target?: "js" | "javascript" | string;
+  target?: ProcessingOutputTarget | string;
+  output?: ProcessingOutputTarget | string;
   baseUrl?: string | URL;
+  backend?: ProcessingSketchBackend;
+  renderer?: ProcessingSketchBackend;
   p5?: P5Constructor;
+  canvas2d?: Canvas2DBackendOptions;
+  canvasOptions?: Canvas2DBackendOptions;
   core?: BinaryInput;
   coreUrl?: BinaryInput;
   coreArchive?: BinaryInput;
@@ -21,12 +29,33 @@ export interface ProcessingRunOptions {
   sourceMaps?: boolean;
   optimizationLevel?: TeaVMOptimizationLevel;
   optimization?: TeaVMOptimizationLevel;
+  fastGlobalAnalysis?: boolean;
+  fastDependencyAnalysis?: boolean;
+  fallbackToJs?: boolean;
+  worker?: boolean | Worker;
+  workerUrl?: string | URL;
+  wasmName?: string;
+  wasmOutputName?: string;
+  wasmRuntime?: string | URL;
+  wasmRuntimeUrl?: string | URL;
+  wasmRuntimeOptions?: Record<string, unknown>;
+  sketchWasmRuntime?: string | URL;
+  sketchWasmRuntimeUrl?: string | URL;
+  sketchWasmRuntimeOptions?: Record<string, unknown>;
   sketchName?: string;
   launcherClass?: string;
+  onDiagnostic?: (diagnostic: ProcessingDiagnostic) => void;
+  onState?: (state: "compiling" | "emitting" | string) => void;
 }
 
 export interface ProcessingCompileOptions {
+  target?: ProcessingOutputTarget | string;
+  output?: ProcessingOutputTarget | string;
+  backend?: ProcessingSketchBackend;
+  renderer?: ProcessingSketchBackend;
   p5?: P5Constructor;
+  canvas2d?: Canvas2DBackendOptions;
+  canvasOptions?: Canvas2DBackendOptions;
   core?: BinaryInput;
   coreUrl?: BinaryInput;
   coreArchive?: BinaryInput;
@@ -35,9 +64,18 @@ export interface ProcessingCompileOptions {
   sourceMaps?: boolean;
   optimizationLevel?: TeaVMOptimizationLevel;
   optimization?: TeaVMOptimizationLevel;
+  fastGlobalAnalysis?: boolean;
+  fastDependencyAnalysis?: boolean;
+  fallbackToJs?: boolean;
+  worker?: boolean | Worker;
+  workerUrl?: string | URL;
+  wasmName?: string;
+  wasmOutputName?: string;
   sketchName?: string;
   launcherClass?: string;
   diagnosticsElement?: Element;
+  onDiagnostic?: (diagnostic: ProcessingDiagnostic) => void;
+  onState?: (state: "compiling" | "emitting" | string) => void;
 }
 
 export interface ProcessingDiagnostic {
@@ -63,10 +101,37 @@ export interface ProcessingCompileResult {
   launcherSource: string;
 }
 
+export interface ProcessingSketchTimings {
+  compileMs?: number;
+  emitMs?: number;
+  totalMs?: number;
+  workerStartupMs?: number;
+  compileRequestMs?: number;
+}
+
+export interface ProcessingGeneratedSketch {
+  compiled: boolean;
+  diagnostics: ProcessingDiagnostic[];
+  preprocessed?: ProcessingPreprocessResult;
+  launcherClass?: string;
+  launcherSource?: string;
+  output?: "js" | "wasm-gc";
+  moduleText?: string;
+  wasmBytes?: Uint8Array;
+  wasmFileName?: string;
+  sourceMap?: string | null;
+  compilerSourceMap?: string | null;
+  files?: string[];
+  timings?: ProcessingSketchTimings;
+}
+
 export interface ProcessingRunResult {
   element: Element;
-  output: "js";
-  p5: unknown;
+  output: "js" | "wasm-gc";
+  backend: "p5" | "canvas2d";
+  p5: unknown | null;
+  runtime?: unknown;
+  canvas?: HTMLCanvasElement | null;
   sketch: unknown;
   diagnostics: ProcessingDiagnostic[];
   preprocessed: ProcessingPreprocessResult;
@@ -74,10 +139,23 @@ export interface ProcessingRunResult {
   module?: unknown;
   sourceMap?: string | null;
   compilerSourceMap?: string | null;
+  timings?: ProcessingSketchTimings;
+  wasmRuntime?: unknown;
+  wasmBytes?: Uint8Array;
+  wasmFileName?: string;
 }
 
 export interface P5Constructor {
   new (sketch: (p: unknown) => void, node?: Element): unknown;
+}
+
+export interface Canvas2DBackendOptions {
+  canvas?: HTMLCanvasElement;
+  document?: Document;
+  pixelDensity?: number;
+  alpha?: boolean;
+  desynchronized?: boolean;
+  crossOrigin?: string | false;
 }
 
 export class ProcessingLoadError extends Error {
@@ -93,10 +171,10 @@ export class ProcessingPreprocessError extends Error {
 
 export class ProcessingCompileError extends Error {
   readonly element: Element | null;
-  readonly compiled?: ProcessingCompileResult;
+  readonly compiled?: ProcessingCompileResult | ProcessingGeneratedSketch;
   readonly diagnostics: ProcessingDiagnostic[];
   readonly preprocessed?: ProcessingPreprocessResult;
-  constructor(element: Element | null, message: string, compiled?: ProcessingCompileResult);
+  constructor(element: Element | null, message: string, compiled?: ProcessingCompileResult | ProcessingGeneratedSketch);
 }
 
 export function runProcessingSketches(options?: ProcessingRunOptions): Promise<ProcessingRunResult[]>;
@@ -110,7 +188,31 @@ export function compileProcessingSketch(
   sources: Array<string | ProcessingSource>,
   options?: ProcessingCompileOptions
 ): Promise<ProcessingCompileResult>;
+export function generateProcessingSketch(
+  sources: Array<string | ProcessingSource>,
+  options?: ProcessingCompileOptions
+): Promise<ProcessingGeneratedSketch>;
+export function generateProcessingSketchOnMainThread(
+  sources: Array<string | ProcessingSource>,
+  options?: ProcessingCompileOptions
+): Promise<ProcessingGeneratedSketch>;
+export function emitProcessingSketch(
+  compiled: ProcessingCompileResult,
+  options?: ProcessingCompileOptions
+): ProcessingGeneratedSketch;
+export function emitProcessingSketchWithFallback(
+  compiled: ProcessingCompileResult,
+  options?: ProcessingCompileOptions
+): Promise<ProcessingGeneratedSketch>;
 export function preprocessProcessing(
   sources: Array<string | ProcessingSource>,
   options?: ProcessingCompileOptions
 ): Promise<ProcessingPreprocessResult>;
+export function createCanvas2DBackend(parent: Element, options?: Canvas2DBackendOptions): unknown;
+export const createCanvas2DHost: typeof createCanvas2DBackend;
+export function composeTeaVmSourceMap(
+  compilerSourceMapText: string | null | undefined,
+  mapper: unknown,
+  preprocessed: ProcessingPreprocessResult
+): string | null;
+export function inlineSourceMap(text: string, sourceMapText?: string | null): string;

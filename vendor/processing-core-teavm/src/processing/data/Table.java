@@ -31,8 +31,6 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Types;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -2138,27 +2136,9 @@ public class Table {
     final String[] typeNames = dictionary.getStringColumn(typeCol);
 
     if (dictionary.getColumnCount() > 1) {
-      if (getRowCount() > 1000) {
-        int proc = Runtime.getRuntime().availableProcessors();
-        ExecutorService pool = Executors.newFixedThreadPool(proc/2);
-        for (int i = 0; i < dictionary.getRowCount(); i++) {
-          final int col = i;
-          pool.execute(new Runnable() {
-            public void run() {
-              setColumnType(col, typeNames[col]);
-            }
-          });
-        }
-        pool.shutdown();
-        while (!pool.isTerminated()) {
-          Thread.yield();
-        }
-
-      } else {
-        for (int col = 0; col < dictionary.getRowCount(); col++) {
+      for (int col = 0; col < dictionary.getRowCount(); col++) {
 //          setColumnType(i, dictionary.getString(i, typeCol));
-          setColumnType(col, typeNames[col]);
-        }
+        setColumnType(col, typeNames[col]);
       }
     }
   }

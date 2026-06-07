@@ -38,4 +38,7 @@ public interface JavaScriptCompilationOptions extends JSObject {
 
     @JSProperty
     JSString getOptimizationLevel();
+
+    @JSProperty
+    boolean isFastGlobalAnalysis();
 }

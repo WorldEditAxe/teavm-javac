@@ -56,6 +56,9 @@ sourceSets {
     }
     classlibEmu {
     }
+    runtimeClasslibEmu {
+        compileClasspath += configurations.classlibInput + configurations.classlibAuxInput
+    }
 }
 
 compileJava {
@@ -141,7 +144,8 @@ def repackCldr = tasks.register("repackCldr", Zip) {
 }
 
 def prepareTeaVMClassLib = tasks.register("prepareTeaVMClassLib", Copy) {
-    dependsOn unpackTeaVMClasslib, repackCldr
+    dependsOn unpackTeaVMClasslib, repackCldr, sourceSets.runtimeClasslibEmu.output
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
     from(unpackTeaVMClasslib) {
         exclude "org/teavm/classlib/impl/unicode/cldr-json.zip"
     }
@@ -167,6 +171,10 @@ def prepareTeaVMClassLib = tasks.register("prepareTeaVMClassLib", Copy) {
                 exclude()
             }
         }
+    }
+    from(sourceSets.runtimeClasslibEmu.output) {
+        include "org/teavm/classlib/java/nio/TByteBuffer.class"
+        include "org/teavm/classlib/java/nio/TCharBuffer.class"
     }
     into project.layout.buildDirectory.dir("tmp/classlib-runtime")
 }

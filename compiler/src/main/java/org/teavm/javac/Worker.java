@@ -251,6 +251,7 @@ public final class Worker {
     private boolean generateWebAssembly(CompileMessage request, String outputName) {
         var requestId = request.getId();
         var optimizationLevel = request.getOptimizationLevel();
+        var fastGlobalAnalysis = request.isFastGlobalAnalysis();
         var options = new WebAssemblyCompilationOptions() {
             @Override
             public JSString getOutputName() {
@@ -265,6 +266,11 @@ public final class Worker {
             @Override
             public JSString getOptimizationLevel() {
                 return optimizationLevel != null ? JSString.valueOf(optimizationLevel) : null;
+            }
+
+            @Override
+            public boolean isFastGlobalAnalysis() {
+                return fastGlobalAnalysis;
             }
         };
         var reg = compiler.onDiagnostic(diagnostic -> handleTeaVMDiagnostic((TeaVMDiagnostic) diagnostic, requestId));
@@ -281,6 +287,7 @@ public final class Worker {
         }
         var selectedModuleType = moduleType;
         var optimizationLevel = request.getOptimizationLevel();
+        var fastGlobalAnalysis = request.isFastGlobalAnalysis();
         var options = new JavaScriptCompilationOptions() {
             @Override
             public JSString getOutputName() {
@@ -310,6 +317,11 @@ public final class Worker {
             @Override
             public JSString getOptimizationLevel() {
                 return optimizationLevel != null ? JSString.valueOf(optimizationLevel) : null;
+            }
+
+            @Override
+            public boolean isFastGlobalAnalysis() {
+                return fastGlobalAnalysis;
             }
         };
         var reg = compiler.onDiagnostic(diagnostic -> handleTeaVMDiagnostic((TeaVMDiagnostic) diagnostic, requestId));

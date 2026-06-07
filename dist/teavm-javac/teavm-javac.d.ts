@@ -124,6 +124,8 @@ export interface EmitWasmOptions {
   mainClass: string;
   optimizationLevel?: TeaVMOptimizationLevel;
   optimization?: TeaVMOptimizationLevel;
+  fastGlobalAnalysis?: boolean;
+  fastDependencyAnalysis?: boolean;
 }
 
 export interface EmitWasmResult {
@@ -145,6 +147,8 @@ export interface EmitJsOptions {
   sourceMapName?: string;
   optimizationLevel?: TeaVMOptimizationLevel;
   optimization?: TeaVMOptimizationLevel;
+  fastGlobalAnalysis?: boolean;
+  fastDependencyAnalysis?: boolean;
 }
 
 export interface EmitJsResult {

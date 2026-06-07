@@ -29,4 +29,7 @@ public interface WebAssemblyCompilationOptions extends JSObject {
 
     @JSProperty
     JSString getOptimizationLevel();
+
+    @JSProperty
+    boolean isFastGlobalAnalysis();
 }

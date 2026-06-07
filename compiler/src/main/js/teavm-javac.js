@@ -66,6 +66,10 @@ export async function loadCompilerRuntime(input = {}) {
 export const loadRuntime = loadCompilerRuntime;
 
 export async function supportsCompilerWasmGC() {
+  return (await getCompilerWasmGCSupport()).supported;
+}
+
+export async function getCompilerWasmGCSupport() {
   if (compilerWasmGCSupportPromise == null) {
     compilerWasmGCSupportPromise = probeCompilerWasmGC();
   }
@@ -76,6 +80,7 @@ export class JavaCompiler {
   constructor(raw, runtime) {
     this.raw = raw;
     this.runtime = runtime;
+    this.startupDiagnostics = Array.from(runtime.diagnostics ?? [], cloneDiagnostic);
     this.classes = createFileSet(
       () => raw.listOutputFiles(),
       (path) => raw.getOutputFile(path),
@@ -155,6 +160,9 @@ export class JavaCompiler {
   }
 
   onDiagnostic(listener) {
+    for (const diagnostic of this.startupDiagnostics) {
+      listener(cloneDiagnostic(diagnostic));
+    }
     const registration = this.raw.onDiagnostic(listener);
     return {
       unsubscribe: () => registration.destroy(),
@@ -179,6 +187,7 @@ export class JavaCompiler {
       outputName,
       mainClass: required(options.mainClass, "mainClass"),
       optimizationLevel: normalizeOptimizationLevel(options.optimizationLevel ?? options.optimization ?? "simple"),
+      fastGlobalAnalysis: Boolean(options.fastGlobalAnalysis ?? options.fastDependencyAnalysis),
     });
     const bytes = ok ? this.wasm.get(fileName) : null;
 
@@ -201,6 +210,7 @@ export class JavaCompiler {
       sourceMap,
       sourceMapName,
       optimizationLevel: normalizeOptimizationLevel(options.optimizationLevel ?? options.optimization ?? "simple"),
+      fastGlobalAnalysis: Boolean(options.fastGlobalAnalysis ?? options.fastDependencyAnalysis),
     });
     const bytes = ok ? this.js.get(fileName) : null;
     const sourceMapBytes = ok && sourceMap ? this.js.get(sourceMapName) : null;
@@ -262,16 +272,22 @@ async function loadCompilerRuntimeRequest(request) {
 }
 
 async function importBestCompilerRuntime(request) {
-  if (await supportsCompilerWasmGC()) {
+  const support = await getCompilerWasmGCSupport();
+  if (support.supported) {
     try {
       return await importCompilerWasmRuntime(request);
     } catch (error) {
       if (request.fallbackToJs === false) {
         throw error;
       }
+      return await importCompilerRuntimeWithDiagnostics(String(request.compilerJs), [
+        createWasmFallbackDiagnostic(`the Wasm-GC compiler runtime failed to load: ${error?.message ?? error}`),
+      ]);
     }
   }
-  return await importCompilerRuntime(String(request.compilerJs));
+  return await importCompilerRuntimeWithDiagnostics(String(request.compilerJs), [
+    createWasmFallbackDiagnostic(support.reason ?? "Wasm-GC or JSPI is not available"),
+  ]);
 }
 
 async function importCompilerWasmRuntime(request) {
@@ -289,6 +305,15 @@ async function importCompilerWasmRuntime(request) {
   ));
   runtime.backend = "wasm-gc";
   runtime.source = wasmInput;
+  return runtime;
+}
+
+async function importCompilerRuntimeWithDiagnostics(specifier, diagnostics) {
+  const runtime = await importCompilerRuntime(specifier);
+  runtime.diagnostics = [
+    ...(runtime.diagnostics ?? []),
+    ...diagnostics.map(cloneDiagnostic),
+  ];
   return runtime;
 }
 
@@ -370,6 +395,7 @@ function normalizeCompilerRuntime(input) {
   return {
     exports: input,
     source: null,
+    diagnostics: Array.from(input.diagnostics ?? [], cloneDiagnostic),
   };
 }
 
@@ -491,14 +517,14 @@ function isBinaryInput(value) {
 
 async function probeCompilerWasmGC() {
   const wasm = globalThis.WebAssembly;
-  if (
-    wasm == null
-    || typeof wasm.compile !== "function"
-    || typeof wasm.instantiate !== "function"
-    || typeof wasm.Suspending !== "function"
-    || typeof wasm.promising !== "function"
-  ) {
-    return false;
+  if (wasm == null) {
+    return unsupportedCompilerWasmGC("WebAssembly is not available");
+  }
+  if (typeof wasm.compile !== "function" || typeof wasm.instantiate !== "function") {
+    return unsupportedCompilerWasmGC("WebAssembly.compile or WebAssembly.instantiate is not available");
+  }
+  if (typeof wasm.Suspending !== "function" || typeof wasm.promising !== "function") {
+    return unsupportedCompilerWasmGC("JSPI is not available");
   }
 
   try {
@@ -506,10 +532,31 @@ async function probeCompilerWasmGC() {
       builtins: ["js-string"],
     });
     await wasm.instantiate(module, {});
-    return true;
-  } catch {
-    return false;
+    return { supported: true, reason: null };
+  } catch (error) {
+    return unsupportedCompilerWasmGC(
+      `Wasm-GC or js-string builtins are not available: ${error?.message ?? error}`
+    );
   }
+}
+
+function unsupportedCompilerWasmGC(reason) {
+  return { supported: false, reason };
+}
+
+function createWasmFallbackDiagnostic(reason) {
+  return {
+    type: "teavm-runtime",
+    severity: "warning",
+    fileName: null,
+    message: `TeaVM Wasm-GC compiler backend is not available (${reason}); falling back to the JavaScript compiler backend. Use a supporting browser such as modern Chrome for the Wasm-GC compiler runtime.`,
+  };
+}
+
+function cloneDiagnostic(diagnostic) {
+  return {
+    ...diagnostic,
+  };
 }
 
 function createFileSet(listFiles, getFile, getArchive) {

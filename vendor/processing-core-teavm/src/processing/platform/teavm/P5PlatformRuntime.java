@@ -162,8 +162,14 @@ public class P5PlatformRuntime implements PlatformRuntime {
 
   @Override
   public PGraphics createGraphics(String renderer) {
-    if (renderer.equals(PGraphicsP5.class.getName())) {
-      return new PGraphicsP5();
+    if (renderer.equals(PGraphicsP5.class.getName()) || renderer.equals(PConstants.JAVA2D)) {
+      return new PGraphicsP5(false);
+    }
+    if (renderer.equals(PConstants.P2D)) {
+      return new PGraphicsP5(false);
+    }
+    if (renderer.equals(PConstants.P3D) || renderer.equals(PConstants.OPENGL)) {
+      return new PGraphicsP5(true);
     }
     throw new UnsupportedOperationException("Renderer is not available in TeaVM: " + renderer);
   }

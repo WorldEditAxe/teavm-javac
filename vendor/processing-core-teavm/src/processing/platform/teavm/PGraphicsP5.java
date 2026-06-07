@@ -24,6 +24,8 @@ package processing.platform.teavm;
 
 import org.teavm.jso.JSObject;
 
+import processing.core.PApplet;
+import processing.core.PConstants;
 import processing.core.PFont;
 import processing.core.PGraphics;
 import processing.core.PImage;
@@ -33,9 +35,26 @@ import processing.core.PMatrix3D;
 import processing.core.PSurface;
 
 public class PGraphicsP5 extends PGraphics {
-  private PMatrix2D matrix = new PMatrix2D();
-  private PMatrix2D[] matrixStack = new PMatrix2D[MATRIX_STACK_DEPTH];
+  private final boolean webgl;
+  private PMatrix3D matrix = new PMatrix3D();
+  private PMatrix3D[] matrixStack = new PMatrix3D[MATRIX_STACK_DEPTH];
   private int matrixStackDepth;
+  private boolean webglDefaultsPending;
+
+
+  public PGraphicsP5() {
+    this(false);
+  }
+
+
+  public PGraphicsP5(boolean webgl) {
+    this.webgl = webgl;
+  }
+
+
+  boolean isWebGL() {
+    return webgl;
+  }
 
 
   private JSObject p5() {
@@ -55,9 +74,23 @@ public class PGraphicsP5 extends PGraphics {
 
 
   @Override
+  public void setSize(int width, int height) {
+    super.setSize(width, height);
+    if (webgl) {
+      webglDefaultsPending = true;
+    }
+  }
+
+
+  @Override
   public void beginDraw() {
     checkSettings();
     matrixStackDepth = 0;
+    if (webgl && webglDefaultsPending) {
+      perspective();
+      camera();
+      webglDefaultsPending = false;
+    }
     resetMatrix();
     vertexCount = 0;
   }
@@ -116,8 +149,29 @@ public class PGraphicsP5 extends PGraphics {
 
 
   @Override
+  public void point(float x, float y, float z) {
+    if (webgl) {
+      P5Bridge.point3(p5(), x, y, z);
+    } else {
+      point(x, y);
+    }
+  }
+
+
+  @Override
   public void line(float x1, float y1, float x2, float y2) {
     P5Bridge.line(p5(), x1, y1, x2, y2);
+  }
+
+
+  @Override
+  public void line(float x1, float y1, float z1,
+                   float x2, float y2, float z2) {
+    if (webgl) {
+      P5Bridge.line3(p5(), x1, y1, z1, x2, y2, z2);
+    } else {
+      line(x1, y1, x2, y2);
+    }
   }
 
 
@@ -177,7 +231,21 @@ public class PGraphicsP5 extends PGraphics {
 
   @Override
   public void vertex(float x, float y, float z) {
-    vertex(x, y);
+    super.vertex(x, y, z);
+    if (webgl) {
+      P5Bridge.vertex3(p5(), x, y, z);
+    } else {
+      P5Bridge.vertex(p5(), x, y);
+    }
+  }
+
+
+  @Override
+  public void normal(float nx, float ny, float nz) {
+    super.normal(nx, ny, nz);
+    if (webgl) {
+      P5Bridge.normal(p5(), nx, ny, nz);
+    }
   }
 
 
@@ -301,45 +369,109 @@ public class PGraphicsP5 extends PGraphics {
   public void resetMatrix() {
     matrix.reset();
     P5Bridge.resetMatrix(p5());
+    applyWebglOrigin();
+  }
+
+
+  private void applyWebglOrigin() {
+    if (webgl) {
+      P5Bridge.translate3(p5(), -width / 2.0f, -height / 2.0f, 0);
+    }
   }
 
 
   @Override
   public void translate(float x, float y) {
     matrix.translate(x, y);
-    P5Bridge.translate(p5(), x, y);
+    if (webgl) {
+      P5Bridge.translate3(p5(), x, y, 0);
+    } else {
+      P5Bridge.translate(p5(), x, y);
+    }
   }
 
 
   @Override
   public void translate(float x, float y, float z) {
-    translate(x, y);
+    matrix.translate(x, y, z);
+    if (webgl) {
+      P5Bridge.translate3(p5(), x, y, z);
+    } else {
+      P5Bridge.translate(p5(), x, y);
+    }
   }
 
 
   @Override
   public void rotate(float angle) {
-    matrix.rotate(angle);
-    P5Bridge.rotate(p5(), angle);
+    matrix.rotateZ(angle);
+    if (webgl) {
+      P5Bridge.rotateZ(p5(), angle);
+    } else {
+      P5Bridge.rotate(p5(), angle);
+    }
+  }
+
+
+  @Override
+  public void rotateX(float angle) {
+    if (webgl) {
+      matrix.rotateX(angle);
+      P5Bridge.rotateX(p5(), angle);
+    } else {
+      super.rotateX(angle);
+    }
+  }
+
+
+  @Override
+  public void rotateY(float angle) {
+    if (webgl) {
+      matrix.rotateY(angle);
+      P5Bridge.rotateY(p5(), angle);
+    } else {
+      super.rotateY(angle);
+    }
+  }
+
+
+  @Override
+  public void rotateZ(float angle) {
+    rotate(angle);
   }
 
 
   @Override
   public void scale(float scale) {
-    P5Bridge.scale(p5(), scale, scale);
+    if (webgl) {
+      matrix.scale(scale, scale, scale);
+      P5Bridge.scale3(p5(), scale, scale, scale);
+    } else {
+      matrix.scale(scale, scale);
+      P5Bridge.scale(p5(), scale, scale);
+    }
   }
 
 
   @Override
   public void scale(float x, float y) {
     matrix.scale(x, y);
-    P5Bridge.scale(p5(), x, y);
+    if (webgl) {
+      P5Bridge.scale3(p5(), x, y, 1);
+    } else {
+      P5Bridge.scale(p5(), x, y);
+    }
   }
 
 
   @Override
   public void scale(float x, float y, float z) {
-    scale(x, y);
+    matrix.scale(x, y, z);
+    if (webgl) {
+      P5Bridge.scale3(p5(), x, y, z);
+    } else {
+      P5Bridge.scale(p5(), x, y);
+    }
   }
 
 
@@ -371,8 +503,17 @@ public class PGraphicsP5 extends PGraphics {
 
   @Override
   public void applyMatrix(PMatrix3D source) {
-    applyMatrix(source.m00, source.m01, source.m03,
-                source.m10, source.m11, source.m13);
+    if (webgl) {
+      matrix.apply(source);
+      P5Bridge.applyMatrix3(p5(),
+                             source.m00, source.m01, source.m02, source.m03,
+                             source.m10, source.m11, source.m12, source.m13,
+                             source.m20, source.m21, source.m22, source.m23,
+                             source.m30, source.m31, source.m32, source.m33);
+    } else {
+      applyMatrix(source.m00, source.m01, source.m03,
+                  source.m10, source.m11, source.m13);
+    }
   }
 
 
@@ -381,14 +522,26 @@ public class PGraphicsP5 extends PGraphics {
                           float n10, float n11, float n12, float n13,
                           float n20, float n21, float n22, float n23,
                           float n30, float n31, float n32, float n33) {
-    applyMatrix(n00, n01, n03,
-                n10, n11, n13);
+    if (webgl) {
+      matrix.apply(n00, n01, n02, n03,
+                   n10, n11, n12, n13,
+                   n20, n21, n22, n23,
+                   n30, n31, n32, n33);
+      P5Bridge.applyMatrix3(p5(),
+                             n00, n01, n02, n03,
+                             n10, n11, n12, n13,
+                             n20, n21, n22, n23,
+                             n30, n31, n32, n33);
+    } else {
+      applyMatrix(n00, n01, n03,
+                  n10, n11, n13);
+    }
   }
 
 
   @Override
   public PMatrix getMatrix() {
-    return matrix.get();
+    return webgl ? matrix.get() : getMatrix(new PMatrix2D());
   }
 
 
@@ -397,7 +550,8 @@ public class PGraphicsP5 extends PGraphics {
     if (target == null) {
       target = new PMatrix2D();
     }
-    target.set(matrix);
+    target.set(matrix.m00, matrix.m01, matrix.m03,
+               matrix.m10, matrix.m11, matrix.m13);
     return target;
   }
 
@@ -426,18 +580,229 @@ public class PGraphicsP5 extends PGraphics {
   public void setMatrix(PMatrix2D source) {
     matrix.set(source);
     P5Bridge.resetMatrix(p5());
+    applyWebglOrigin();
     P5Bridge.applyMatrix(p5(), matrix.m00, matrix.m10, matrix.m01,
-                         matrix.m11, matrix.m02, matrix.m12);
+                         matrix.m11, matrix.m03, matrix.m13);
   }
 
 
   @Override
   public void setMatrix(PMatrix3D source) {
-    matrix.set(source.m00, source.m01, source.m03,
-               source.m10, source.m11, source.m13);
+    matrix.set(source);
     P5Bridge.resetMatrix(p5());
-    P5Bridge.applyMatrix(p5(), matrix.m00, matrix.m10, matrix.m01,
-                         matrix.m11, matrix.m02, matrix.m12);
+    applyWebglOrigin();
+    if (webgl) {
+      P5Bridge.applyMatrix3(p5(),
+                             source.m00, source.m01, source.m02, source.m03,
+                             source.m10, source.m11, source.m12, source.m13,
+                             source.m20, source.m21, source.m22, source.m23,
+                             source.m30, source.m31, source.m32, source.m33);
+    } else {
+      P5Bridge.applyMatrix(p5(), matrix.m00, matrix.m10, matrix.m01,
+                           matrix.m11, matrix.m03, matrix.m13);
+    }
+  }
+
+
+  @Override
+  public void box(float size) {
+    box(size, size, size);
+  }
+
+
+  @Override
+  public void box(float width, float height, float depth) {
+    if (webgl) {
+      P5Bridge.box(p5(), width, height, depth);
+    } else {
+      super.box(width, height, depth);
+    }
+  }
+
+
+  @Override
+  public void sphere(float radius) {
+    if (webgl) {
+      if ((sphereDetailU < 3) || (sphereDetailV < 2)) {
+        sphereDetail(30);
+      }
+      P5Bridge.sphere(p5(), radius, sphereDetailU, sphereDetailV);
+    } else {
+      super.sphere(radius);
+    }
+  }
+
+
+  @Override
+  public void lights() {
+    if (webgl) {
+      P5Bridge.lights(p5());
+    } else {
+      super.lights();
+    }
+  }
+
+
+  @Override
+  public void noLights() {
+    if (webgl) {
+      P5Bridge.noLights(p5());
+    } else {
+      super.noLights();
+    }
+  }
+
+
+  @Override
+  public void ambientLight(float v1, float v2, float v3) {
+    if (webgl) {
+      P5Bridge.ambientLight(p5(), v1, v2, v3);
+    } else {
+      super.ambientLight(v1, v2, v3);
+    }
+  }
+
+
+  @Override
+  public void ambientLight(float v1, float v2, float v3,
+                           float x, float y, float z) {
+    ambientLight(v1, v2, v3);
+  }
+
+
+  @Override
+  public void directionalLight(float v1, float v2, float v3,
+                               float nx, float ny, float nz) {
+    if (webgl) {
+      P5Bridge.directionalLight(p5(), v1, v2, v3, nx, ny, nz);
+    } else {
+      super.directionalLight(v1, v2, v3, nx, ny, nz);
+    }
+  }
+
+
+  @Override
+  public void pointLight(float v1, float v2, float v3,
+                         float x, float y, float z) {
+    if (webgl) {
+      P5Bridge.pointLight(p5(), v1, v2, v3, toWebglX(x), toWebglY(y), z);
+    } else {
+      super.pointLight(v1, v2, v3, x, y, z);
+    }
+  }
+
+
+  @Override
+  public void spotLight(float v1, float v2, float v3,
+                        float x, float y, float z,
+                        float nx, float ny, float nz,
+                        float angle, float concentration) {
+    if (webgl) {
+      P5Bridge.spotLight(p5(), v1, v2, v3, toWebglX(x), toWebglY(y), z,
+                         nx, ny, nz, angle, concentration);
+    } else {
+      super.spotLight(v1, v2, v3, x, y, z, nx, ny, nz, angle, concentration);
+    }
+  }
+
+
+  @Override
+  public void camera() {
+    float cameraZ = (height / 2.0f) / PApplet.tan(PConstants.PI * 60.0f / 360.0f);
+    camera(width / 2.0f, height / 2.0f, cameraZ,
+           width / 2.0f, height / 2.0f, 0,
+           0, 1, 0);
+  }
+
+
+  @Override
+  public void camera(float eyeX, float eyeY, float eyeZ,
+                     float centerX, float centerY, float centerZ,
+                     float upX, float upY, float upZ) {
+    if (webgl) {
+      P5Bridge.camera(p5(),
+                      toWebglX(eyeX), toWebglY(eyeY), eyeZ,
+                      toWebglX(centerX), toWebglY(centerY), centerZ,
+                      upX, upY, upZ);
+    } else {
+      super.camera(eyeX, eyeY, eyeZ, centerX, centerY, centerZ, upX, upY, upZ);
+    }
+  }
+
+
+  private float toWebglX(float x) {
+    return x - width / 2.0f;
+  }
+
+
+  private float toWebglY(float y) {
+    return y - height / 2.0f;
+  }
+
+
+  @Override
+  public void ortho() {
+    ortho(-width / 2.0f, width / 2.0f, -height / 2.0f, height / 2.0f);
+  }
+
+
+  @Override
+  public void ortho(float left, float right, float bottom, float top) {
+    ortho(left, right, bottom, top, 0, Math.max(width, height) * 10.0f);
+  }
+
+
+  @Override
+  public void ortho(float left, float right,
+                    float bottom, float top,
+                    float near, float far) {
+    if (webgl) {
+      P5Bridge.ortho(p5(), left, right, bottom, top, near, far);
+    } else {
+      super.ortho(left, right, bottom, top, near, far);
+    }
+  }
+
+
+  @Override
+  public void perspective() {
+    float cameraZ = (height / 2.0f) / PApplet.tan(PConstants.PI * 60.0f / 360.0f);
+    perspective(PConstants.PI / 3.0f, (float) width / (float) height,
+                cameraZ / 10.0f, cameraZ * 10.0f);
+  }
+
+
+  @Override
+  public void perspective(float fovy, float aspect, float zNear, float zFar) {
+    if (webgl) {
+      P5Bridge.perspective(p5(), fovy, aspect, zNear, zFar);
+    } else {
+      super.perspective(fovy, aspect, zNear, zFar);
+    }
+  }
+
+
+  @Override
+  public void frustum(float left, float right,
+                      float bottom, float top,
+                      float near, float far) {
+    if (webgl) {
+      P5Bridge.frustum(p5(), left, right, bottom, top, near, far);
+    } else {
+      super.frustum(left, right, bottom, top, near, far);
+    }
+  }
+
+
+  @Override
+  public boolean is3D() {
+    return webgl;
+  }
+
+
+  @Override
+  public boolean isGL() {
+    return webgl;
   }
 
 
@@ -476,13 +841,13 @@ public class PGraphicsP5 extends PGraphics {
 
   @Override
   public float textAscent() {
-    return textSize * 0.8f;
+    return P5Bridge.textAscent(p5(), textSize * 0.8f);
   }
 
 
   @Override
   public float textDescent() {
-    return textSize * 0.2f;
+    return P5Bridge.textDescent(p5(), textSize * 0.2f);
   }
 
 

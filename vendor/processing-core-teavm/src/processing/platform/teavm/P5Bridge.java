@@ -97,7 +97,18 @@ final class P5Bridge {
     "function emitMouse(ev, action, count) {" +
     "  if (!mouseCallback) return;" +
     "  var pos = position(ev);" +
+    "  if (p5) {" +
+    "    p5.__processingTeaVMMouseX = pos.x;" +
+    "    p5.__processingTeaVMMouseY = pos.y;" +
+    "  }" +
     "  mouseCallback(ev, millis(), action, modifiers(ev), pos.x, pos.y, button(ev), count || ev.detail || 0);" +
+    "}" +
+    "function insideCanvas(ev) {" +
+    "  var rect = canvas.getBoundingClientRect();" +
+    "  return ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom;" +
+    "}" +
+    "function emitMouseIfInside(ev, action, count) {" +
+    "  if (insideCanvas(ev)) emitMouse(ev, action, count);" +
     "}" +
     "function keyData(ev) {" +
     "  var named = {" +
@@ -132,6 +143,10 @@ final class P5Bridge {
     "canvas.addEventListener('mousemove', function(ev) {" +
     "  emitMouse(ev, ev.buttons ? MOUSE_DRAG : MOUSE_MOVE, 0);" +
     "});" +
+    "window.addEventListener('mousemove', function(ev) {" +
+    "  if (ev.target === canvas) return;" +
+    "  emitMouseIfInside(ev, ev.buttons ? MOUSE_DRAG : MOUSE_MOVE, 0);" +
+    "});" +
     "canvas.addEventListener('click', function(ev) {" +
     "  emitMouse(ev, MOUSE_CLICK, ev.detail || 1);" +
     "});" +
@@ -158,6 +173,18 @@ final class P5Bridge {
   static native void installInputHandlers(JSObject p5, JSObject renderer,
                                           MouseInputCallback mouseCallback,
                                           KeyInputCallback keyCallback);
+
+
+  @JSBody(params = { "p5" }, script =
+    "if (p5 && isFinite(p5.__processingTeaVMMouseX)) return p5.__processingTeaVMMouseX | 0;" +
+    "return p5 && isFinite(p5.mouseX) ? p5.mouseX | 0 : 0;")
+  static native int mouseX(JSObject p5);
+
+
+  @JSBody(params = { "p5" }, script =
+    "if (p5 && isFinite(p5.__processingTeaVMMouseY)) return p5.__processingTeaVMMouseY | 0;" +
+    "return p5 && isFinite(p5.mouseY) ? p5.mouseY | 0 : 0;")
+  static native int mouseY(JSObject p5);
 
 
   @JSBody(params = { }, script = "return Date.now();")
@@ -204,10 +231,12 @@ final class P5Bridge {
   static native void noLoop(JSObject p5);
 
 
-  @JSBody(params = { "p5", "width", "height" }, script =
+  @JSBody(params = { "p5", "width", "height", "webgl" }, script =
     "if (!p5 || typeof p5.createCanvas !== 'function') return null;" +
-    "return p5.createCanvas(width, height);")
-  static native JSObject createCanvas(JSObject p5, int width, int height);
+    "if (!webgl) return p5.createCanvas(width, height);" +
+    "var mode = p5.WEBGL || (typeof WEBGL !== 'undefined' ? WEBGL : 'webgl');" +
+    "return p5.createCanvas(width, height, mode);")
+  static native JSObject createCanvas(JSObject p5, int width, int height, boolean webgl);
 
 
   @JSBody(params = { "p5", "width", "height" }, script =
@@ -393,14 +422,40 @@ final class P5Bridge {
   static native void translate(JSObject p5, float x, float y);
 
 
+  @JSBody(params = { "p5", "x", "y", "z" }, script =
+    "if (p5 && typeof p5.translate === 'function') p5.translate(x, y, z);")
+  static native void translate3(JSObject p5, float x, float y, float z);
+
+
   @JSBody(params = { "p5", "angle" }, script =
     "if (p5 && typeof p5.rotate === 'function') p5.rotate(angle);")
   static native void rotate(JSObject p5, float angle);
 
 
+  @JSBody(params = { "p5", "angle" }, script =
+    "if (p5 && typeof p5.rotateX === 'function') p5.rotateX(angle);")
+  static native void rotateX(JSObject p5, float angle);
+
+
+  @JSBody(params = { "p5", "angle" }, script =
+    "if (p5 && typeof p5.rotateY === 'function') p5.rotateY(angle);")
+  static native void rotateY(JSObject p5, float angle);
+
+
+  @JSBody(params = { "p5", "angle" }, script =
+    "if (p5 && typeof p5.rotateZ === 'function') p5.rotateZ(angle);" +
+    "else if (p5 && typeof p5.rotate === 'function') p5.rotate(angle);")
+  static native void rotateZ(JSObject p5, float angle);
+
+
   @JSBody(params = { "p5", "x", "y" }, script =
     "if (p5 && typeof p5.scale === 'function') p5.scale(x, y);")
   static native void scale(JSObject p5, float x, float y);
+
+
+  @JSBody(params = { "p5", "x", "y", "z" }, script =
+    "if (p5 && typeof p5.scale === 'function') p5.scale(x, y, z);")
+  static native void scale3(JSObject p5, float x, float y, float z);
 
 
   @JSBody(params = { "p5", "a", "b", "c", "d", "e", "f" }, script =
@@ -409,14 +464,36 @@ final class P5Bridge {
                                  float d, float e, float f);
 
 
+  @JSBody(params = { "p5", "n00", "n01", "n02", "n03", "n10", "n11", "n12", "n13", "n20", "n21", "n22", "n23", "n30", "n31", "n32", "n33" }, script =
+    "if (p5 && typeof p5.applyMatrix === 'function') {" +
+    "  p5.applyMatrix(n00, n01, n02, n03, n10, n11, n12, n13, n20, n21, n22, n23, n30, n31, n32, n33);" +
+    "}")
+  static native void applyMatrix3(JSObject p5,
+                                  float n00, float n01, float n02, float n03,
+                                  float n10, float n11, float n12, float n13,
+                                  float n20, float n21, float n22, float n23,
+                                  float n30, float n31, float n32, float n33);
+
+
   @JSBody(params = { "p5", "x", "y" }, script =
     "if (p5 && typeof p5.point === 'function') p5.point(x, y);")
   static native void point(JSObject p5, float x, float y);
 
 
+  @JSBody(params = { "p5", "x", "y", "z" }, script =
+    "if (p5 && typeof p5.point === 'function') p5.point(x, y, z);")
+  static native void point3(JSObject p5, float x, float y, float z);
+
+
   @JSBody(params = { "p5", "x1", "y1", "x2", "y2" }, script =
     "if (p5 && typeof p5.line === 'function') p5.line(x1, y1, x2, y2);")
   static native void line(JSObject p5, float x1, float y1, float x2, float y2);
+
+
+  @JSBody(params = { "p5", "x1", "y1", "z1", "x2", "y2", "z2" }, script =
+    "if (p5 && typeof p5.line === 'function') p5.line(x1, y1, z1, x2, y2, z2);")
+  static native void line3(JSObject p5, float x1, float y1, float z1,
+                           float x2, float y2, float z2);
 
 
   @JSBody(params = { "p5", "x1", "y1", "x2", "y2", "x3", "y3" }, script =
@@ -476,10 +553,93 @@ final class P5Bridge {
   static native void vertex(JSObject p5, float x, float y);
 
 
+  @JSBody(params = { "p5", "x", "y", "z" }, script =
+    "if (p5 && typeof p5.vertex === 'function') p5.vertex(x, y, z);")
+  static native void vertex3(JSObject p5, float x, float y, float z);
+
+
   @JSBody(params = { "p5", "close" }, script =
     "if (!p5 || typeof p5.endShape !== 'function') return;" +
     "if (close) p5.endShape(p5.CLOSE || 'close'); else p5.endShape();")
   static native void endShape(JSObject p5, boolean close);
+
+
+  @JSBody(params = { "p5", "nx", "ny", "nz" }, script =
+    "if (p5 && typeof p5.normal === 'function') p5.normal(nx, ny, nz);")
+  static native void normal(JSObject p5, float nx, float ny, float nz);
+
+
+  @JSBody(params = { "p5", "width", "height", "depth" }, script =
+    "if (p5 && typeof p5.box === 'function') p5.box(width, height, depth);")
+  static native void box(JSObject p5, float width, float height, float depth);
+
+
+  @JSBody(params = { "p5", "radius", "detailX", "detailY" }, script =
+    "if (!p5 || typeof p5.sphere !== 'function') return;" +
+    "if (detailX > 0 && detailY > 0) p5.sphere(radius, detailX, detailY);" +
+    "else p5.sphere(radius);")
+  static native void sphere(JSObject p5, float radius, int detailX, int detailY);
+
+
+  @JSBody(params = { "p5" }, script =
+    "if (p5 && typeof p5.lights === 'function') p5.lights();")
+  static native void lights(JSObject p5);
+
+
+  @JSBody(params = { "p5" }, script =
+    "if (p5 && typeof p5.noLights === 'function') p5.noLights();")
+  static native void noLights(JSObject p5);
+
+
+  @JSBody(params = { "p5", "v1", "v2", "v3" }, script =
+    "if (p5 && typeof p5.ambientLight === 'function') p5.ambientLight(v1, v2, v3);")
+  static native void ambientLight(JSObject p5, float v1, float v2, float v3);
+
+
+  @JSBody(params = { "p5", "v1", "v2", "v3", "x", "y", "z" }, script =
+    "if (p5 && typeof p5.pointLight === 'function') p5.pointLight(v1, v2, v3, x, y, z);")
+  static native void pointLight(JSObject p5, float v1, float v2, float v3,
+                                float x, float y, float z);
+
+
+  @JSBody(params = { "p5", "v1", "v2", "v3", "nx", "ny", "nz" }, script =
+    "if (p5 && typeof p5.directionalLight === 'function') p5.directionalLight(v1, v2, v3, nx, ny, nz);")
+  static native void directionalLight(JSObject p5, float v1, float v2, float v3,
+                                      float nx, float ny, float nz);
+
+
+  @JSBody(params = { "p5", "v1", "v2", "v3", "x", "y", "z", "nx", "ny", "nz", "angle", "concentration" }, script =
+    "if (p5 && typeof p5.spotLight === 'function') p5.spotLight(v1, v2, v3, x, y, z, nx, ny, nz, angle, concentration);")
+  static native void spotLight(JSObject p5, float v1, float v2, float v3,
+                               float x, float y, float z,
+                               float nx, float ny, float nz,
+                               float angle, float concentration);
+
+
+  @JSBody(params = { "p5", "eyeX", "eyeY", "eyeZ", "centerX", "centerY", "centerZ", "upX", "upY", "upZ" }, script =
+    "if (p5 && typeof p5.camera === 'function') p5.camera(eyeX, eyeY, eyeZ, centerX, centerY, centerZ, upX, upY, upZ);")
+  static native void camera(JSObject p5,
+                            float eyeX, float eyeY, float eyeZ,
+                            float centerX, float centerY, float centerZ,
+                            float upX, float upY, float upZ);
+
+
+  @JSBody(params = { "p5", "left", "right", "bottom", "top", "near", "far" }, script =
+    "if (p5 && typeof p5.ortho === 'function') p5.ortho(left, right, bottom, top, near, far);")
+  static native void ortho(JSObject p5, float left, float right,
+                           float bottom, float top, float near, float far);
+
+
+  @JSBody(params = { "p5", "fovy", "aspect", "near", "far" }, script =
+    "if (p5 && typeof p5.perspective === 'function') p5.perspective(fovy, aspect, near, far);")
+  static native void perspective(JSObject p5, float fovy, float aspect,
+                                 float near, float far);
+
+
+  @JSBody(params = { "p5", "left", "right", "bottom", "top", "near", "far" }, script =
+    "if (p5 && typeof p5.frustum === 'function') p5.frustum(left, right, bottom, top, near, far);")
+  static native void frustum(JSObject p5, float left, float right,
+                             float bottom, float top, float near, float far);
 
 
   @JSBody(params = { "p5", "image", "x", "y", "width", "height", "sx", "sy", "sw", "sh" }, script =
@@ -490,7 +650,20 @@ final class P5Bridge {
 
 
   @JSBody(params = { "p5", "text", "x", "y" }, script =
-    "if (p5 && typeof p5.text === 'function') p5.text(text, x, y);")
+    "if (!p5 || typeof p5.text !== 'function') return;" +
+    "function java2DTextCoordinate(value) {" +
+    "  value = Number(value);" +
+    "  if (!isFinite(value)) return 0;" +
+    "  return value < 0 ? Math.ceil(value + 0.5) : Math.floor(value + 0.5);" +
+    "}" +
+    "var pushed = false;" +
+    "if (typeof p5.push === 'function') {" +
+    "  p5.push();" +
+    "  pushed = true;" +
+    "}" +
+    "if (typeof p5.noStroke === 'function') p5.noStroke();" +
+    "p5.text(text, java2DTextCoordinate(x), java2DTextCoordinate(y));" +
+    "if (pushed && typeof p5.pop === 'function') p5.pop();")
   static native void text(JSObject p5, String text, float x, float y);
 
 
@@ -517,6 +690,20 @@ final class P5Bridge {
     "if (!p5 || typeof p5.textWidth !== 'function') return text ? text.length * 10 : 0;" +
     "return p5.textWidth(text);")
   static native float textWidth(JSObject p5, String text);
+
+
+  @JSBody(params = { "p5", "fallback" }, script =
+    "if (!p5 || typeof p5.textAscent !== 'function') return fallback;" +
+    "var value = p5.textAscent();" +
+    "return isFinite(value) && value > 0 ? value : fallback;")
+  static native float textAscent(JSObject p5, float fallback);
+
+
+  @JSBody(params = { "p5", "fallback" }, script =
+    "if (!p5 || typeof p5.textDescent !== 'function') return fallback;" +
+    "var value = p5.textDescent();" +
+    "return isFinite(value) && value > 0 ? value : fallback;")
+  static native float textDescent(JSObject p5, float fallback);
 
 
   @JSBody(params = { "p5", "cursor" }, script =
