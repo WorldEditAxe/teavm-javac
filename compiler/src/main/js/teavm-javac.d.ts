@@ -1,5 +1,6 @@
 export type BinaryInput = string | URL | ArrayBuffer | ArrayBufferView | Int8Array;
 export type TeaVMOptimizationLevel = "simple" | "advanced" | "full" | "SIMPLE" | "ADVANCED" | "FULL";
+export type CompilerBackend = "auto" | "js" | "javascript" | "wasm" | "wasm-gc" | "wasmgc";
 
 export interface CompilerClasslibOptions {
   javac?: BinaryInput;
@@ -14,13 +15,31 @@ export interface CompilerRuntimeExports {
 
 export interface CompilerRuntime {
   exports: CompilerRuntimeExports;
+  backend?: "js" | "wasm-gc" | string;
   source?: string | URL | null;
+  instance?: unknown;
+  module?: unknown;
 }
 
-export interface CreateCompilerOptions {
+export interface CompilerRuntimeLoadOptions {
+  backend?: CompilerBackend;
+  compilerBackend?: CompilerBackend;
+  runtimeBackend?: CompilerBackend;
   compilerJs?: string | URL | CompilerRuntime | CompilerRuntimeExports;
   compilerJsUrl?: string | URL;
   compilerRuntime?: CompilerRuntime | CompilerRuntimeExports;
+  compilerWasm?: BinaryInput;
+  compilerWasmUrl?: BinaryInput;
+  compilerWasmRuntime?: string | URL;
+  compilerWasmRuntimeUrl?: string | URL;
+  wasmRuntime?: string | URL;
+  wasmRuntimeUrl?: string | URL;
+  wasmRuntimeOptions?: Record<string, unknown>;
+  runtimeOptions?: Record<string, unknown>;
+  fallbackToJs?: boolean;
+}
+
+export interface CreateCompilerOptions extends CompilerRuntimeLoadOptions {
   javacClasslib?: BinaryInput;
   javacClasslibUrl?: BinaryInput;
   runtimeClasslib?: BinaryInput;
@@ -168,8 +187,9 @@ export class JavaCompiler {
 }
 
 export function createCompiler(options?: CreateCompilerOptions): Promise<JavaCompiler>;
-export function installWorker(options?: Pick<CreateCompilerOptions, "compilerJs" | "compilerJsUrl" | "compilerRuntime">): Promise<CompilerRuntime>;
+export function installWorker(options?: CompilerRuntimeLoadOptions): Promise<CompilerRuntime>;
 export function loadCompilerRuntime(
-  input?: string | URL | CompilerRuntime | CompilerRuntimeExports
+  input?: string | URL | CompilerRuntime | CompilerRuntimeExports | CompilerRuntimeLoadOptions
 ): Promise<CompilerRuntime>;
 export const loadRuntime: typeof loadCompilerRuntime;
+export function supportsCompilerWasmGC(): Promise<boolean>;

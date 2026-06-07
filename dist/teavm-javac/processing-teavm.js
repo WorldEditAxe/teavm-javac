@@ -21,48 +21,42 @@ export async function runProcessingSketches(options = {}) {
 export const runProcessingTags = runProcessingSketches;
 
 export async function runProcessingElement(element, options = {}, index = 0) {
-  try {
-    const src = element.getAttribute("src");
-    if (!src) {
-      throw new ProcessingLoadError(element, "Processing element is missing src");
-    }
-
-    normalizeOutput(
-      element.getAttribute("target") ??
-      element.getAttribute("output") ??
-      element.getAttribute("type") ??
-      options.target ??
-      "js"
-    );
-    const sources = await loadPdeSources(src, element, options);
-    const sketchName = toJavaIdentifier(
-      options.sketchName ??
-      element.getAttribute("sketch-name") ??
-      firstSourceBaseName(sources[0]?.path ?? `Sketch${index + 1}`)
-    );
-
-    setState(element, "compiling");
-    const compiled = await compileProcessingSketch(sources, {
-      ...options,
-      sketchName,
-      diagnosticsElement: element,
-    });
-
-    if (!compiled.compiled) {
-      throw new ProcessingCompileError(element, buildCompileFailureMessage(compiled), compiled, {
-        phase: "compile",
-      });
-    }
-
-    setState(element, "emitting");
-    const result = await emitAndRunJs(compiled, element, options);
-
-    setState(element, "running");
-    return result;
-  } catch (error) {
-    setState(element, "error");
-    throw error;
+  const src = element.getAttribute("src");
+  if (!src) {
+    throw new ProcessingLoadError(element, "Processing element is missing src");
   }
+
+  normalizeOutput(
+    element.getAttribute("target") ??
+    element.getAttribute("output") ??
+    element.getAttribute("type") ??
+    options.target ??
+    "js"
+  );
+  const sources = await loadPdeSources(src, element, options);
+  const sketchName = toJavaIdentifier(
+    options.sketchName ??
+    element.getAttribute("sketch-name") ??
+    firstSourceBaseName(sources[0]?.path ?? `Sketch${index + 1}`)
+  );
+
+  setState(element, "compiling");
+  const compiled = await compileProcessingSketch(sources, {
+    ...options,
+    sketchName,
+    diagnosticsElement: element,
+  });
+
+  if (!compiled.compiled) {
+    setState(element, "error");
+    throw new ProcessingCompileError(element, "Java compilation failed", compiled);
+  }
+
+  setState(element, "emitting");
+  const result = await emitAndRunJs(compiled, element, options);
+
+  setState(element, "running");
+  return result;
 }
 
 export async function compileProcessingSketch(sources, options = {}) {
@@ -123,9 +117,7 @@ async function emitAndRunJs(compiled, element, options) {
   });
 
   if (!emitted.ok || !emitted.text) {
-    throw new ProcessingCompileError(element, buildEmitFailureMessage(compiled, emitted), compiled, {
-      phase: "emit",
-    });
+    throw new ProcessingCompileError(element, "TeaVM JavaScript emit failed", compiled);
   }
 
   const sourceMap = composeTeaVmSourceMap(emitted.sourceMapText, compiled.mapper, compiled.preprocessed);
@@ -133,7 +125,7 @@ async function emitAndRunJs(compiled, element, options) {
   const moduleUrl = URL.createObjectURL(new Blob([moduleText], { type: "text/javascript" }));
   try {
     const module = await import(moduleUrl);
-    const mounted = await mountSketch(element, module.start, options.p5, compiled);
+    const mounted = await mountSketch(element, module.start, options.p5);
     return {
       element,
       output: "js",
@@ -151,16 +143,10 @@ async function emitAndRunJs(compiled, element, options) {
   }
 }
 
-async function mountSketch(element, start, suppliedP5, compiled) {
+async function mountSketch(element, start, suppliedP5) {
   const P5 = suppliedP5 ?? globalThis.p5;
   if (typeof P5 !== "function") {
     throw new ProcessingLoadError(element, "p5.js is not loaded; pass { p5 } or load p5 before running sketches");
-  }
-
-  if (typeof start !== "function") {
-    throw new ProcessingCompileError(element, "Compiled Processing module did not export a start(p5) function", compiled, {
-      phase: "mount",
-    });
   }
 
   element.replaceChildren();
@@ -177,10 +163,7 @@ async function mountSketch(element, start, suppliedP5, compiled) {
           }));
           resolve({ p5: p5Instance, sketch });
         } catch (error) {
-          reject(new ProcessingCompileError(element, buildSketchStartupFailureMessage(error, compiled), compiled, {
-            cause: error,
-            phase: "mount",
-          }));
+          reject(error);
         }
       };
     }, element);
@@ -441,98 +424,6 @@ function mapDiagnostic(diagnostic, mapper) {
     lineNumber: mapped.line + 1,
     columnNumber: mapped.column + 1,
   };
-}
-
-function buildCompileFailureMessage(compiled) {
-  const diagnostics = compiled?.diagnostics ?? [];
-  if (diagnostics.length > 0) {
-    return `Java compilation failed with ${diagnostics.length} diagnostic${diagnostics.length === 1 ? "" : "s"}:\n${formatDiagnostics(diagnostics)}`;
-  }
-
-  const preprocessed = compiled?.preprocessed;
-  const context = [
-    preprocessed?.className ? `sketch class ${preprocessed.className}` : null,
-    preprocessed?.sourceFileName ? `generated source ${preprocessed.sourceFileName}` : null,
-    compiled?.launcherClass ? `launcher ${compiled.launcherClass}` : null,
-  ].filter(Boolean).join(", ");
-
-  return context
-    ? `Java compilation failed without diagnostics (${context}).`
-    : "Java compilation failed without diagnostics.";
-}
-
-function buildEmitFailureMessage(compiled, emitted) {
-  const parts = ["TeaVM JavaScript emit failed."];
-  if (compiled?.diagnostics?.length) {
-    parts.push(`Previous diagnostics:\n${formatDiagnostics(compiled.diagnostics)}`);
-  }
-  if (emitted?.fileName || emitted?.files?.length) {
-    parts.push(`Emit output: ${emitted.fileName ?? "unknown file"}; files: ${formatList(emitted.files ?? [])}`);
-  }
-  return parts.join("\n");
-}
-
-function buildSketchStartupFailureMessage(error, compiled) {
-  const preprocessed = compiled?.preprocessed;
-  const source = preprocessed?.className ? ` for ${preprocessed.className}` : "";
-  return `Compiled Processing sketch failed during p5 setup${source}: ${describeError(error)}`;
-}
-
-function buildPreprocessFailureMessage(preprocessed) {
-  const issues = preprocessed?.issues ?? [];
-  if (issues.length > 0) {
-    return `Processing preprocessing failed with ${issues.length} issue${issues.length === 1 ? "" : "s"}:\n${formatIssues(issues)}`;
-  }
-  return "Processing preprocessing failed without reported issues.";
-}
-
-function formatDiagnostics(diagnostics) {
-  return diagnostics.map(formatDiagnostic).join("\n");
-}
-
-function formatDiagnostic(diagnostic) {
-  const severity = diagnostic.severity ?? diagnostic.type ?? "diagnostic";
-  const location = formatLocation(diagnostic.fileName, diagnostic.lineNumber, diagnostic.columnNumber);
-  const generated = diagnostic.generatedFileName
-    ? ` (generated ${formatLocation(diagnostic.generatedFileName, diagnostic.generatedLineNumber, diagnostic.generatedColumnNumber)})`
-    : "";
-  const message = diagnostic.message ?? "No message";
-  return `- ${severity} ${location}${generated}: ${message}`;
-}
-
-function formatIssues(issues) {
-  return issues.map((issue) => {
-    const location = formatLocation(null, issue.line, issue.column);
-    return `- ${location}: ${issue.message ?? "No message"}`;
-  }).join("\n");
-}
-
-function formatLocation(fileName, lineNumber, columnNumber) {
-  const file = fileName ?? "Processing source";
-  if (lineNumber == null) {
-    return file;
-  }
-  if (columnNumber == null) {
-    return `${file}:${lineNumber}`;
-  }
-  return `${file}:${lineNumber}:${columnNumber}`;
-}
-
-function formatList(values) {
-  return values.length > 0 ? values.join(", ") : "none";
-}
-
-function describeError(error) {
-  if (error == null) {
-    return "unknown error";
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error.message) {
-    return error.message;
-  }
-  return String(error);
 }
 
 function composeTeaVmSourceMap(compilerSourceMapText, mapper, preprocessed) {
@@ -844,38 +735,29 @@ function base64EncodeUtf8(text) {
 }
 
 export class ProcessingLoadError extends Error {
-  constructor(element, message, options = {}) {
+  constructor(element, message) {
     super(message);
     this.name = "ProcessingLoadError";
     this.element = element;
-    this.phase = options.phase ?? "load";
-    if (options.cause) {
-      this.cause = options.cause;
-    }
   }
 }
 
 export class ProcessingPreprocessError extends Error {
   constructor(preprocessed) {
-    super(buildPreprocessFailureMessage(preprocessed));
+    super(preprocessed.issues[0]?.message ?? "Processing preprocessing failed");
     this.name = "ProcessingPreprocessError";
     this.preprocessed = preprocessed;
     this.issues = preprocessed.issues;
-    this.phase = "preprocess";
   }
 }
 
 export class ProcessingCompileError extends Error {
-  constructor(element, message, compiled, options = {}) {
+  constructor(element, message, compiled) {
     super(message);
     this.name = "ProcessingCompileError";
     this.element = element;
     this.compiled = compiled;
     this.diagnostics = compiled?.diagnostics ?? [];
     this.preprocessed = compiled?.preprocessed;
-    this.phase = options.phase ?? "compile";
-    if (options.cause) {
-      this.cause = options.cause;
-    }
   }
 }

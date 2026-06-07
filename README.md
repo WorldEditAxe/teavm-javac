@@ -1,4 +1,4 @@
-An offline and self-contained browser-based Java compiler (forked from the [original project](https://github.com/konsoletyper/teavm-javac)) that runs on top of OpenJDK's `javac` and TeaVM's compiler (+ corresponding backends for JS and WASM). The built WebAssembly module includes both the Java compiler and TeaVM as a single unified binary.
+An offline and self-contained browser-based Java compiler (forked from the [original project](https://github.com/konsoletyper/teavm-javac)) that runs on top of OpenJDK's `javac` and TeaVM's compiler backends for JavaScript and WebAssembly. The compiler runtime is distributed as both JavaScript and Wasm-GC, with automatic Wasm-GC selection when the browser supports it.
 
 Unlike the original project, this fork is written to be more developer-oriented and ready for inclusion in applications. It also has the option to build for JavaScript targets, includes more of the TeaVM classlib, and fixes a bug in the original TeaVM compiler that broke `@JSBody`. The API surface has been reworked as well.
 
@@ -46,16 +46,25 @@ console.log(js.fileName); // classes.js
 console.log(js.text);
 ```
 
-`createCompiler()` loads `compiler.wasm`, `compile-classlib-teavm.bin`, and
+`createCompiler()` loads `compile-classlib-teavm.bin` and
 `runtime-classlib-teavm.bin` from the same folder as `teavm-javac.js` by default.
-You can override them with URLs or binary data:
+For the compiler runtime, it first tries the Wasm-GC build (`compiler.wasm` through
+`compiler.wasm-runtime.js`) when JSPI and the required Wasm-GC/string builtins are
+available, then falls back to the JavaScript build (`compiler.js`). You can override
+the runtime and classlib files with URLs or binary data:
 
 ```ts
 type BinarySource = string | URL | ArrayBuffer | ArrayBufferView;
 
 declare function createCompiler(options?: {
-  wasm?: BinarySource;
-  wasmUrl?: BinarySource;
+  backend?: "auto" | "js" | "wasm-gc";
+  compilerJs?: string | URL;
+  compilerJsUrl?: string | URL;
+  compilerWasm?: BinarySource;
+  compilerWasmUrl?: BinarySource;
+  compilerWasmRuntime?: string | URL;
+  compilerWasmRuntimeUrl?: string | URL;
+  fallbackToJs?: boolean;
   javacClasslib?: BinarySource;
   javacClasslibUrl?: BinarySource;
   runtimeClasslib?: BinarySource;
@@ -94,6 +103,8 @@ declare class JavaCompiler {
     mainClass: string;
     name?: string; // defaults to "app"
     outputName?: string;
+    optimizationLevel?: "simple" | "advanced" | "full";
+    optimization?: "simple" | "advanced" | "full";
   }): {
     ok: boolean;
     fileName: string;

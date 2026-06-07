@@ -187,17 +187,76 @@ def buildTeaVMClassLib = tasks.register("buildTeaVMClassLib", JavaExec) {
     mainClass = "org.teavm.javac.ArchiveBuilder"
 }
 
+def wasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc")
+def optimizedWasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc-optimized")
+
+def optimizeWasmGC = tasks.register("optimizeWasmGC") {
+    group "build"
+    description "Runs wasm-opt -O4 over generated TeaVM Wasm-GC compiler binaries."
+    dependsOn generateWasmGC, copyWasmGCRuntime
+    inputs.files(provider {
+        fileTree(wasmGcOutputDir.get().asFile) {
+            include "*.wasm"
+        }
+    })
+    outputs.dir optimizedWasmGcOutputDir
+
+    doLast {
+        def inputDir = wasmGcOutputDir.get().asFile
+        def outputDir = optimizedWasmGcOutputDir.get().asFile
+        delete outputDir
+        outputDir.mkdirs()
+
+        fileTree(inputDir) {
+            include "*.wasm"
+        }.files.each { inputFile ->
+            def outputFile = new File(outputDir, inputFile.name)
+            def command = [
+                    "wasm-opt",
+                        "-O4",
+                        "--skip-pass=flatten",
+                        "--enable-gc",
+                        "--enable-strings",
+                        "--enable-reference-types",
+                        "--enable-exception-handling",
+                        "--enable-multivalue",
+                        "--enable-bulk-memory",
+                        "--enable-nontrapping-float-to-int",
+                        inputFile.absolutePath,
+                        "-o",
+                        outputFile.absolutePath
+            ]
+            def process = new ProcessBuilder(command)
+                    .redirectErrorStream(true)
+                    .start()
+            process.inputStream.eachLine { line ->
+                logger.lifecycle(line)
+            }
+            def exitCode = process.waitFor()
+            if (exitCode != 0) {
+                throw new GradleException("wasm-opt failed for ${inputFile.name} with exit code ${exitCode}")
+            }
+        }
+    }
+}
+
 build {
-    dependsOn generateJavaScript, buildTeaVMClassLib, generateClassLib
+    dependsOn generateJavaScript, optimizeWasmGC, buildTeaVMClassLib, generateClassLib
 }
 
 def createDist = tasks.register("createDist", Zip) {
     group "build"
-    dependsOn generateJavaScript
+    dependsOn generateJavaScript, optimizeWasmGC
     from buildTeaVMClassLib
     from generateClassLib
     from "src/main/js"
     from layout.buildDirectory.dir("generated/teavm/js")
+    from(wasmGcOutputDir) {
+        exclude "*.wasm"
+    }
+    from(optimizedWasmGcOutputDir) {
+        include "*.wasm"
+    }
     exclude "src/**"
     archiveBaseName = "dist"
 }

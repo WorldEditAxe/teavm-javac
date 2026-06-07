@@ -1,6 +1,9 @@
 const DEFAULT_COMPILER_JS_URL = new URL("./compiler.js", import.meta.url);
+const DEFAULT_COMPILER_WASM_URL = new URL("./compiler.wasm", import.meta.url);
+const DEFAULT_COMPILER_WASM_RUNTIME_URL = new URL("./compiler.wasm-runtime.js", import.meta.url);
 const DEFAULT_JAVAC_CLASSLIB_URL = new URL("./compile-classlib-teavm.bin", import.meta.url);
 const DEFAULT_RUNTIME_CLASSLIB_URL = new URL("./runtime-classlib-teavm.bin", import.meta.url);
+const DEFAULT_COMPILER_BACKEND = "auto";
 const COMPILER_EXPORT_NAMES = [
   "Compiler",
   "ProcessingPreprocessResult",
@@ -11,13 +14,20 @@ const COMPILER_EXPORT_NAMES = [
   "installWorker",
 ];
 
+const WASM_GC_JS_STRING_PROBE_BYTES = new Uint8Array([
+  0, 97, 115, 109, 1, 0, 0, 0, 1, 7, 1, 96, 1, 127, 1, 100, 111, 2, 31, 1, 14,
+  119, 97, 115, 109, 58, 106, 115, 45, 115, 116, 114, 105, 110, 103, 12, 102,
+  114, 111, 109, 67, 104, 97, 114, 67, 111, 100, 101, 0, 0, 3, 1, 0, 5, 4, 1,
+  1, 0, 0, 7, 10, 1, 6, 109, 101, 109, 111, 114, 121, 2, 0, 10, 129, 128, 128,
+  0, 0,
+]);
+
 const textDecoder = new TextDecoder();
 const compilerRuntimeCache = new Map();
+let compilerWasmGCSupportPromise = null;
 
 export async function createCompiler(options = {}) {
-  const runtime = await loadCompilerRuntime(
-    options.compilerJs ?? options.compilerJsUrl ?? options.compilerRuntime ?? DEFAULT_COMPILER_JS_URL
-  );
+  const runtime = await loadCompilerRuntime(resolveCompilerRuntimeInput(options));
   const compiler = new JavaCompiler(runtime.exports.createCompiler(), runtime);
 
   if (options.loadClasslib !== false) {
@@ -31,30 +41,36 @@ export async function createCompiler(options = {}) {
 }
 
 export async function installWorker(options = {}) {
-  const runtime = await loadCompilerRuntime(
-    options.compilerJs ?? options.compilerJsUrl ?? options.compilerRuntime ?? DEFAULT_COMPILER_JS_URL
-  );
+  const runtime = await loadCompilerRuntime(resolveCompilerRuntimeInput(options));
   runtime.exports.installWorker();
   return runtime;
 }
 
-export async function loadCompilerRuntime(input = DEFAULT_COMPILER_JS_URL) {
+export async function loadCompilerRuntime(input = {}) {
   if (isCompilerRuntime(input)) {
     return normalizeCompilerRuntime(input);
   }
 
-  if (typeof input !== "string" && !(input instanceof URL)) {
-    throw new TypeError("Expected a compiler.js URL or TeaVM compiler runtime object");
-  }
+  const request = normalizeCompilerRuntimeRequest(input);
+  const cacheKey = compilerRuntimeCacheKey(request);
 
-  const specifier = String(input);
-  if (!compilerRuntimeCache.has(specifier)) {
-    compilerRuntimeCache.set(specifier, importCompilerRuntime(specifier));
+  if (cacheKey == null) {
+    return await loadCompilerRuntimeRequest(request);
   }
-  return await compilerRuntimeCache.get(specifier);
+  if (!compilerRuntimeCache.has(cacheKey)) {
+    compilerRuntimeCache.set(cacheKey, loadCompilerRuntimeRequest(request));
+  }
+  return await compilerRuntimeCache.get(cacheKey);
 }
 
 export const loadRuntime = loadCompilerRuntime;
+
+export async function supportsCompilerWasmGC() {
+  if (compilerWasmGCSupportPromise == null) {
+    compilerWasmGCSupportPromise = probeCompilerWasmGC();
+  }
+  return await compilerWasmGCSupportPromise;
+}
 
 export class JavaCompiler {
   constructor(raw, runtime) {
@@ -214,8 +230,8 @@ async function importCompilerRuntime(specifier) {
 
   let runtime;
   try {
-    await import(specifier);
-    runtime = captureCompilerRuntime(globalObject, specifier);
+    const moduleNamespace = await import(specifier);
+    runtime = captureCompilerRuntime(globalObject, specifier, moduleNamespace);
   } finally {
     restoreGlobals(globalObject, previousExports);
     if (!hadSelf) {
@@ -232,22 +248,75 @@ async function importCompilerRuntime(specifier) {
   return runtime;
 }
 
-function captureCompilerRuntime(globalObject, source) {
+async function loadCompilerRuntimeRequest(request) {
+  switch (request.backend) {
+    case "js":
+      return await importCompilerRuntime(String(request.compilerJs));
+    case "wasm-gc":
+      return await importCompilerWasmRuntime(request);
+    case "auto":
+      return await importBestCompilerRuntime(request);
+    default:
+      throw new TypeError(`Unsupported compiler backend: ${request.backend}`);
+  }
+}
+
+async function importBestCompilerRuntime(request) {
+  if (await supportsCompilerWasmGC()) {
+    try {
+      return await importCompilerWasmRuntime(request);
+    } catch (error) {
+      if (request.fallbackToJs === false) {
+        throw error;
+      }
+    }
+  }
+  return await importCompilerRuntime(String(request.compilerJs));
+}
+
+async function importCompilerWasmRuntime(request) {
+  const runtimeModule = await import(String(request.compilerWasmRuntime));
+  if (typeof runtimeModule.load !== "function") {
+    throw new Error(`TeaVM Wasm-GC runtime did not export load() from ${request.compilerWasmRuntime}`);
+  }
+
+  const wasmInput = typeof request.compilerWasm === "string" || request.compilerWasm instanceof URL
+    ? String(request.compilerWasm)
+    : request.compilerWasm;
+  const runtime = normalizeCompilerRuntime(await runtimeModule.load(
+    wasmInput,
+    request.wasmRuntimeOptions
+  ));
+  runtime.backend = "wasm-gc";
+  runtime.source = wasmInput;
+  return runtime;
+}
+
+function captureCompilerRuntime(globalObject, source, moduleNamespace = null) {
   const exports = {};
+  copyCompilerExports(exports, moduleNamespace);
+  copyCompilerExports(exports, moduleNamespace?.default);
+  copyCompilerExports(exports, moduleNamespace?.["module.exports"]);
   for (const name of COMPILER_EXPORT_NAMES) {
     if (globalObject[name] !== undefined) {
       exports[name] = globalObject[name];
     }
   }
 
-  if (typeof exports.createCompiler !== "function") {
-    throw new Error(`TeaVM compiler JavaScript did not export createCompiler from ${source}`);
-  }
-  if (typeof exports.installWorker !== "function") {
-    throw new Error(`TeaVM compiler JavaScript did not export installWorker from ${source}`);
-  }
+  assertCompilerRuntimeExports(exports, source);
 
-  return { exports, source };
+  return { exports, source, backend: "js" };
+}
+
+function copyCompilerExports(target, source) {
+  if (source == null || typeof source !== "object") {
+    return;
+  }
+  for (const name of COMPILER_EXPORT_NAMES) {
+    if (source[name] !== undefined && target[name] === undefined) {
+      target[name] = source[name];
+    }
+  }
 }
 
 function snapshotGlobals(globalObject) {
@@ -294,12 +363,153 @@ function isCompilerRuntime(input) {
 
 function normalizeCompilerRuntime(input) {
   if (typeof input.exports?.createCompiler === "function") {
+    assertCompilerRuntimeExports(input.exports, input.source ?? null);
     return input;
   }
+  assertCompilerRuntimeExports(input, null);
   return {
     exports: input,
     source: null,
   };
+}
+
+function assertCompilerRuntimeExports(exports, source) {
+  if (typeof exports.createCompiler !== "function") {
+    throw new Error(`TeaVM compiler runtime did not export createCompiler${source ? ` from ${source}` : ""}`);
+  }
+  if (typeof exports.installWorker !== "function") {
+    throw new Error(`TeaVM compiler runtime did not export installWorker${source ? ` from ${source}` : ""}`);
+  }
+}
+
+function resolveCompilerRuntimeInput(options) {
+  if (options.compilerRuntime != null) {
+    return options.compilerRuntime;
+  }
+  if (isCompilerRuntime(options.compilerJs)) {
+    return options.compilerJs;
+  }
+  if (options.compilerJs != null || options.compilerJsUrl != null) {
+    return {
+      ...options,
+      backend: "js",
+      compilerJs: options.compilerJs ?? options.compilerJsUrl,
+    };
+  }
+  if (
+    options.compilerWasm != null
+    || options.compilerWasmUrl != null
+    || options.compilerWasmRuntime != null
+    || options.compilerWasmRuntimeUrl != null
+  ) {
+    return {
+      ...options,
+      backend: options.backend ?? options.compilerBackend ?? "wasm-gc",
+    };
+  }
+  return options;
+}
+
+function normalizeCompilerRuntimeRequest(input) {
+  if (typeof input === "string" || input instanceof URL) {
+    return {
+      backend: "js",
+      compilerJs: input,
+      compilerWasm: DEFAULT_COMPILER_WASM_URL,
+      compilerWasmRuntime: DEFAULT_COMPILER_WASM_RUNTIME_URL,
+      wasmRuntimeOptions: {},
+      fallbackToJs: true,
+    };
+  }
+  if (input == null || typeof input !== "object") {
+    throw new TypeError("Expected compiler runtime options, a compiler.js URL, or a TeaVM compiler runtime object");
+  }
+
+  const compilerJs = input.compilerJs ?? input.compilerJsUrl ?? input.js ?? input.jsUrl ?? DEFAULT_COMPILER_JS_URL;
+  const compilerWasm = input.compilerWasm ?? input.compilerWasmUrl ?? input.wasm ?? input.wasmUrl ?? DEFAULT_COMPILER_WASM_URL;
+  const compilerWasmRuntime = input.compilerWasmRuntime
+    ?? input.compilerWasmRuntimeUrl
+    ?? input.wasmRuntime
+    ?? input.wasmRuntimeUrl
+    ?? DEFAULT_COMPILER_WASM_RUNTIME_URL;
+  const backend = normalizeCompilerBackend(
+    input.backend
+      ?? input.compilerBackend
+      ?? input.runtimeBackend
+      ?? DEFAULT_COMPILER_BACKEND
+  );
+
+  return {
+    backend,
+    compilerJs,
+    compilerWasm,
+    compilerWasmRuntime,
+    wasmRuntimeOptions: input.wasmRuntimeOptions ?? input.runtimeOptions ?? {},
+    fallbackToJs: input.fallbackToJs !== false,
+  };
+}
+
+function normalizeCompilerBackend(value) {
+  const normalized = String(value ?? DEFAULT_COMPILER_BACKEND).toLowerCase().replaceAll("_", "-");
+  switch (normalized) {
+    case "auto":
+    case "best":
+    case "default":
+      return "auto";
+    case "js":
+    case "javascript":
+      return "js";
+    case "wasm":
+    case "wasm-gc":
+    case "wasmgc":
+      return "wasm-gc";
+    default:
+      return normalized;
+  }
+}
+
+function compilerRuntimeCacheKey(request) {
+  if (
+    isBinaryInput(request.compilerWasm)
+    || request.wasmRuntimeOptions == null
+    || Object.keys(request.wasmRuntimeOptions).length > 0
+  ) {
+    return null;
+  }
+  return [
+    request.backend,
+    String(request.compilerJs),
+    String(request.compilerWasm),
+    String(request.compilerWasmRuntime),
+    request.fallbackToJs,
+  ].join("|");
+}
+
+function isBinaryInput(value) {
+  return value instanceof ArrayBuffer || ArrayBuffer.isView(value);
+}
+
+async function probeCompilerWasmGC() {
+  const wasm = globalThis.WebAssembly;
+  if (
+    wasm == null
+    || typeof wasm.compile !== "function"
+    || typeof wasm.instantiate !== "function"
+    || typeof wasm.Suspending !== "function"
+    || typeof wasm.promising !== "function"
+  ) {
+    return false;
+  }
+
+  try {
+    const module = await wasm.compile(WASM_GC_JS_STRING_PROBE_BYTES, {
+      builtins: ["js-string"],
+    });
+    await wasm.instantiate(module, {});
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function createFileSet(listFiles, getFile, getArchive) {
