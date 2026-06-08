@@ -37,9 +37,13 @@ import processing.core.PSurface;
 public class PGraphicsP5 extends PGraphics {
   private final boolean webgl;
   private PMatrix3D matrix = new PMatrix3D();
+  private PMatrix3D lightNormalMatrix = new PMatrix3D();
   private PMatrix3D[] matrixStack = new PMatrix3D[MATRIX_STACK_DEPTH];
   private int matrixStackDepth;
   private boolean webglDefaultsPending;
+  private float lightVectorX;
+  private float lightVectorY;
+  private float lightVectorZ;
 
 
   public PGraphicsP5() {
@@ -92,7 +96,25 @@ public class PGraphicsP5 extends PGraphics {
       webglDefaultsPending = false;
     }
     resetMatrix();
+    if (webgl) {
+      P5Bridge.noLights(p5());
+      P5Bridge.defaultLightState(p5());
+    }
     vertexCount = 0;
+  }
+
+
+  @Override
+  protected void defaultSettings() {
+    super.defaultSettings();
+    if (webgl) {
+      ambient(255);
+      specular(125);
+      emissive(0);
+      shininess(1);
+      setAmbient = false;
+      P5Bridge.ambientMaterial(p5(), fillRi, fillGi, fillBi, fillAi);
+    }
   }
 
 
@@ -327,6 +349,46 @@ public class PGraphicsP5 extends PGraphics {
   protected void fillFromCalc() {
     super.fillFromCalc();
     P5Bridge.fill(p5(), fillRi, fillGi, fillBi, fillAi);
+    if (webgl && !setAmbient) {
+      ambientFromCalc();
+      setAmbient = false;
+    }
+  }
+
+
+  @Override
+  protected void ambientFromCalc() {
+    super.ambientFromCalc();
+    if (webgl) {
+      P5Bridge.ambientMaterial(p5(), calcRi, calcGi, calcBi, calcAi);
+    }
+  }
+
+
+  @Override
+  protected void specularFromCalc() {
+    super.specularFromCalc();
+    if (webgl) {
+      P5Bridge.specularMaterial(p5(), calcRi, calcGi, calcBi, calcAi);
+    }
+  }
+
+
+  @Override
+  protected void emissiveFromCalc() {
+    super.emissiveFromCalc();
+    if (webgl) {
+      P5Bridge.emissiveMaterial(p5(), calcRi, calcGi, calcBi, calcAi);
+    }
+  }
+
+
+  @Override
+  public void shininess(float shine) {
+    super.shininess(shine);
+    if (webgl) {
+      P5Bridge.shininess(p5(), shine);
+    }
   }
 
 
@@ -636,7 +698,10 @@ public class PGraphicsP5 extends PGraphics {
   @Override
   public void lights() {
     if (webgl) {
-      P5Bridge.lights(p5());
+      P5Bridge.noLights(p5());
+      P5Bridge.defaultLightState(p5());
+      P5Bridge.ambientLight(p5(), 128, 128, 128);
+      P5Bridge.directionalLight(p5(), 128, 128, 128, 0, 0, -1);
     } else {
       super.lights();
     }
@@ -647,6 +712,7 @@ public class PGraphicsP5 extends PGraphics {
   public void noLights() {
     if (webgl) {
       P5Bridge.noLights(p5());
+      P5Bridge.defaultLightState(p5());
     } else {
       super.noLights();
     }
@@ -656,7 +722,8 @@ public class PGraphicsP5 extends PGraphics {
   @Override
   public void ambientLight(float v1, float v2, float v3) {
     if (webgl) {
-      P5Bridge.ambientLight(p5(), v1, v2, v3);
+      colorCalc(v1, v2, v3);
+      P5Bridge.ambientLight(p5(), calcRi, calcGi, calcBi);
     } else {
       super.ambientLight(v1, v2, v3);
     }
@@ -671,10 +738,34 @@ public class PGraphicsP5 extends PGraphics {
 
 
   @Override
+  public void lightFalloff(float constant, float linear, float quadratic) {
+    if (webgl) {
+      P5Bridge.lightFalloff(p5(), constant, linear, quadratic);
+    } else {
+      super.lightFalloff(constant, linear, quadratic);
+    }
+  }
+
+
+  @Override
+  public void lightSpecular(float v1, float v2, float v3) {
+    if (webgl) {
+      colorCalc(v1, v2, v3);
+      P5Bridge.lightSpecular(p5(), calcRi, calcGi, calcBi);
+    } else {
+      super.lightSpecular(v1, v2, v3);
+    }
+  }
+
+
+  @Override
   public void directionalLight(float v1, float v2, float v3,
                                float nx, float ny, float nz) {
     if (webgl) {
-      P5Bridge.directionalLight(p5(), v1, v2, v3, nx, ny, nz);
+      colorCalc(v1, v2, v3);
+      transformLightVector(nx, ny, nz);
+      P5Bridge.directionalLight(p5(), calcRi, calcGi, calcBi,
+                                lightVectorX, lightVectorY, lightVectorZ);
     } else {
       super.directionalLight(v1, v2, v3, nx, ny, nz);
     }
@@ -685,7 +776,11 @@ public class PGraphicsP5 extends PGraphics {
   public void pointLight(float v1, float v2, float v3,
                          float x, float y, float z) {
     if (webgl) {
-      P5Bridge.pointLight(p5(), v1, v2, v3, toWebglX(x), toWebglY(y), z);
+      colorCalc(v1, v2, v3);
+      P5Bridge.pointLight(p5(), calcRi, calcGi, calcBi,
+                          toWebglX(transformPointX(x, y, z)),
+                          toWebglY(transformPointY(x, y, z)),
+                          transformPointZ(x, y, z));
     } else {
       super.pointLight(v1, v2, v3, x, y, z);
     }
@@ -698,10 +793,63 @@ public class PGraphicsP5 extends PGraphics {
                         float nx, float ny, float nz,
                         float angle, float concentration) {
     if (webgl) {
-      P5Bridge.spotLight(p5(), v1, v2, v3, toWebglX(x), toWebglY(y), z,
-                         nx, ny, nz, angle, concentration);
+      colorCalc(v1, v2, v3);
+      transformLightVector(nx, ny, nz);
+      P5Bridge.spotLight(p5(), calcRi, calcGi, calcBi,
+                         toWebglX(transformPointX(x, y, z)),
+                         toWebglY(transformPointY(x, y, z)),
+                         transformPointZ(x, y, z),
+                         lightVectorX, lightVectorY, lightVectorZ,
+                         angle, concentration);
     } else {
       super.spotLight(v1, v2, v3, x, y, z, nx, ny, nz, angle, concentration);
+    }
+  }
+
+
+  private float transformPointX(float x, float y, float z) {
+    return matrix.m00 * x + matrix.m01 * y + matrix.m02 * z + matrix.m03;
+  }
+
+
+  private float transformPointY(float x, float y, float z) {
+    return matrix.m10 * x + matrix.m11 * y + matrix.m12 * z + matrix.m13;
+  }
+
+
+  private float transformPointZ(float x, float y, float z) {
+    return matrix.m20 * x + matrix.m21 * y + matrix.m22 * z + matrix.m23;
+  }
+
+
+  private void transformLightVector(float x, float y, float z) {
+    lightNormalMatrix.set(matrix);
+    if (!lightNormalMatrix.invert()) {
+      lightVectorX = 0;
+      lightVectorY = 0;
+      lightVectorZ = 0;
+      return;
+    }
+
+    float nx = x * lightNormalMatrix.m00 +
+               y * lightNormalMatrix.m10 +
+               z * lightNormalMatrix.m20;
+    float ny = x * lightNormalMatrix.m01 +
+               y * lightNormalMatrix.m11 +
+               z * lightNormalMatrix.m21;
+    float nz = x * lightNormalMatrix.m02 +
+               y * lightNormalMatrix.m12 +
+               z * lightNormalMatrix.m22;
+    float length = PApplet.dist(0, 0, 0, nx, ny, nz);
+    if (length > 0) {
+      float inverseLength = 1.0f / length;
+      lightVectorX = nx * inverseLength;
+      lightVectorY = ny * inverseLength;
+      lightVectorZ = nz * inverseLength;
+    } else {
+      lightVectorX = 0;
+      lightVectorY = 0;
+      lightVectorZ = 0;
     }
   }
 
@@ -854,7 +1002,7 @@ public class PGraphicsP5 extends PGraphics {
 
   @Override
   public float textWidth(char c) {
-    return P5Bridge.textWidth(p5(), String.valueOf(c));
+    return textWidth(String.valueOf(c));
   }
 
 
@@ -866,18 +1014,22 @@ public class PGraphicsP5 extends PGraphics {
 
   @Override
   public float textWidth(char[] chars, int start, int length) {
-    return P5Bridge.textWidth(p5(), new String(chars, start, length));
+    return textWidth(new String(chars, start, length));
   }
 
 
   @Override
   protected float textWidthImpl(char[] buffer, int start, int stop) {
-    return P5Bridge.textWidth(p5(), new String(buffer, start, stop - start));
+    return textWidth(new String(buffer, start, stop - start));
   }
 
 
   @Override
   protected void textLineImpl(char[] buffer, int start, int stop, float x, float y) {
-    P5Bridge.text(p5(), new String(buffer, start, stop - start), x, y);
+    if (!fill) {
+      return;
+    }
+    String text = new String(buffer, start, stop - start);
+    P5Bridge.text(p5(), text, x, y);
   }
 }

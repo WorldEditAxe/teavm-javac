@@ -52,10 +52,8 @@ final class P5Bridge {
 
   @JSBody(params = { "p5", "renderer", "mouseCallback", "keyCallback" }, script =
     "var target = renderer || p5;" +
-    "var canvas = target && target.canvas ? target.canvas : target && target.elt ? target.elt : null;" +
-    "if (!canvas && p5 && p5.canvas) canvas = p5.canvas;" +
-    "if (!canvas && p5 && p5._renderer && p5._renderer.canvas) canvas = p5._renderer.canvas;" +
-    "if (!canvas || canvas.__processingTeaVMInputInstalled) return;" +
+    "var canvas = target.canvas || target.elt || p5.canvas || p5._renderer.canvas;" +
+    "if (canvas.__processingTeaVMInputInstalled) return;" +
     "canvas.__processingTeaVMInputInstalled = true;" +
     "canvas.tabIndex = canvas.tabIndex >= 0 ? canvas.tabIndex : 0;" +
     "canvas.style.outline = canvas.style.outline || 'none';" +
@@ -63,7 +61,7 @@ final class P5Bridge {
     "var MOUSE_PRESS = 1, MOUSE_RELEASE = 2, MOUSE_CLICK = 3, MOUSE_DRAG = 4, MOUSE_MOVE = 5, MOUSE_WHEEL = 8;" +
     "var KEY_PRESS = 1, KEY_RELEASE = 2, KEY_TYPE = 3;" +
     "function millis() {" +
-    "  return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();" +
+    "  return performance.now();" +
     "}" +
     "function modifiers(ev) {" +
     "  var value = 0;" +
@@ -79,14 +77,11 @@ final class P5Bridge {
     "function position(ev) {" +
     "  var rect = canvas.getBoundingClientRect();" +
     "  var density = 1;" +
-    "  if (p5 && typeof p5.pixelDensity === 'function') {" +
-    "    var candidateDensity = p5.pixelDensity();" +
-    "    if (isFinite(candidateDensity) && candidateDensity > 0) density = candidateDensity;" +
-    "  } else if (typeof window !== 'undefined' && window.devicePixelRatio) {" +
-    "    density = window.devicePixelRatio;" +
-    "  }" +
-    "  var logicalWidth = p5 && p5.width ? p5.width : canvas.width / density;" +
-    "  var logicalHeight = p5 && p5.height ? p5.height : canvas.height / density;" +
+    "  var candidateDensity = p5.pixelDensity();" +
+    "  if (isFinite(candidateDensity) && candidateDensity > 0) density = candidateDensity;" +
+    "  else density = window.devicePixelRatio || 1;" +
+    "  var logicalWidth = p5.width || canvas.width / density;" +
+    "  var logicalHeight = p5.height || canvas.height / density;" +
     "  var scaleX = rect.width ? logicalWidth / rect.width : 1;" +
     "  var scaleY = rect.height ? logicalHeight / rect.height : 1;" +
     "  return {" +
@@ -95,12 +90,9 @@ final class P5Bridge {
     "  };" +
     "}" +
     "function emitMouse(ev, action, count) {" +
-    "  if (!mouseCallback) return;" +
     "  var pos = position(ev);" +
-    "  if (p5) {" +
-    "    p5.__processingTeaVMMouseX = pos.x;" +
-    "    p5.__processingTeaVMMouseY = pos.y;" +
-    "  }" +
+    "  p5.__processingTeaVMMouseX = pos.x;" +
+    "  p5.__processingTeaVMMouseY = pos.y;" +
     "  mouseCallback(ev, millis(), action, modifiers(ev), pos.x, pos.y, button(ev), count || ev.detail || 0);" +
     "}" +
     "function insideCanvas(ev) {" +
@@ -130,15 +122,14 @@ final class P5Bridge {
     "    /^[a-zA-Z0-9]$/.test(ev.key || '');" +
     "}" +
     "function emitKey(ev, action) {" +
-    "  if (!keyCallback) return;" +
     "  var data = keyData(ev);" +
     "  keyCallback(ev, millis(), action, modifiers(ev), data.key, data.keyCode, !!ev.repeat);" +
-    "  if (isSketchKey(ev) && typeof ev.preventDefault === 'function') ev.preventDefault();" +
+    "  if (isSketchKey(ev)) ev.preventDefault();" +
     "}" +
     "canvas.addEventListener('mousedown', function(ev) {" +
     "  canvas.focus();" +
     "  emitMouse(ev, MOUSE_PRESS, ev.detail || 1);" +
-    "  if (typeof ev.preventDefault === 'function') ev.preventDefault();" +
+    "  ev.preventDefault();" +
     "});" +
     "canvas.addEventListener('mousemove', function(ev) {" +
     "  emitMouse(ev, ev.buttons ? MOUSE_DRAG : MOUSE_MOVE, 0);" +
@@ -153,10 +144,10 @@ final class P5Bridge {
     "canvas.addEventListener('wheel', function(ev) {" +
     "  var count = ev.deltaY < 0 ? -1 : ev.deltaY > 0 ? 1 : 0;" +
     "  emitMouse(ev, MOUSE_WHEEL, count);" +
-    "  if (typeof ev.preventDefault === 'function') ev.preventDefault();" +
+    "  ev.preventDefault();" +
     "}, { passive: false });" +
     "canvas.addEventListener('contextmenu', function(ev) {" +
-    "  if (typeof ev.preventDefault === 'function') ev.preventDefault();" +
+    "  ev.preventDefault();" +
     "});" +
     "window.addEventListener('mouseup', function(ev) {" +
     "  emitMouse(ev, MOUSE_RELEASE, ev.detail || 1);" +
@@ -176,14 +167,14 @@ final class P5Bridge {
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && isFinite(p5.__processingTeaVMMouseX)) return p5.__processingTeaVMMouseX | 0;" +
-    "return p5 && isFinite(p5.mouseX) ? p5.mouseX | 0 : 0;")
+    "if (isFinite(p5.__processingTeaVMMouseX)) return p5.__processingTeaVMMouseX | 0;" +
+    "return isFinite(p5.mouseX) ? p5.mouseX | 0 : 0;")
   static native int mouseX(JSObject p5);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && isFinite(p5.__processingTeaVMMouseY)) return p5.__processingTeaVMMouseY | 0;" +
-    "return p5 && isFinite(p5.mouseY) ? p5.mouseY | 0 : 0;")
+    "if (isFinite(p5.__processingTeaVMMouseY)) return p5.__processingTeaVMMouseY | 0;" +
+    "return isFinite(p5.mouseY) ? p5.mouseY | 0 : 0;")
   static native int mouseY(JSObject p5);
 
 
@@ -192,27 +183,27 @@ final class P5Bridge {
 
 
   @JSBody(params = { }, script =
-    "return typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();")
+    "return performance.now();")
   static native double performanceNow();
 
 
   @JSBody(params = { }, script =
-    "return typeof navigator !== 'undefined' && navigator.hardwareConcurrency ? navigator.hardwareConcurrency : 1;")
+    "return navigator.hardwareConcurrency || 1;")
   static native int hardwareConcurrency();
 
 
   @JSBody(params = { }, script =
-    "return typeof window !== 'undefined' && window.innerWidth ? window.innerWidth : 0;")
+    "return window.innerWidth || 0;")
   static native int innerWidth();
 
 
   @JSBody(params = { }, script =
-    "return typeof window !== 'undefined' && window.innerHeight ? window.innerHeight : 0;")
+    "return window.innerHeight || 0;")
   static native int innerHeight();
 
 
   @JSBody(params = { }, script =
-    "return typeof window !== 'undefined' && window.devicePixelRatio ? window.devicePixelRatio : 1;")
+    "return window.devicePixelRatio || 1;")
   static native double devicePixelRatio();
 
 
@@ -222,252 +213,258 @@ final class P5Bridge {
 
 
   @JSBody(params = { "id" }, script =
-    "if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id);")
+    "cancelAnimationFrame(id);")
   static native void cancelAnimationFrame(double id);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.noLoop === 'function') p5.noLoop();")
+    "p5.noLoop();")
   static native void noLoop(JSObject p5);
 
 
   @JSBody(params = { "p5", "width", "height", "webgl" }, script =
-    "if (!p5 || typeof p5.createCanvas !== 'function') return null;" +
     "if (!webgl) return p5.createCanvas(width, height);" +
-    "var mode = p5.WEBGL || (typeof WEBGL !== 'undefined' ? WEBGL : 'webgl');" +
+    "var mode = p5.WEBGL || 'webgl';" +
     "return p5.createCanvas(width, height, mode);")
   static native JSObject createCanvas(JSObject p5, int width, int height, boolean webgl);
 
 
   @JSBody(params = { "p5", "width", "height" }, script =
-    "if (p5 && typeof p5.resizeCanvas === 'function') p5.resizeCanvas(width, height, true);")
+    "p5.resizeCanvas(width, height, true);")
   static native void resizeCanvas(JSObject p5, int width, int height);
 
 
   @JSBody(params = { "p5", "renderer" }, script =
     "var target = renderer || p5;" +
-    "if (target && target.canvas) return target.canvas;" +
-    "if (target && target.elt) return target.elt;" +
-    "if (p5 && p5.canvas) return p5.canvas;" +
-    "if (p5 && p5._renderer && p5._renderer.canvas) return p5._renderer.canvas;" +
-    "return null;")
+    "return target.canvas || target.elt || p5.canvas || p5._renderer.canvas;")
   static native JSObject canvas(JSObject p5, JSObject renderer);
 
 
   @JSBody(params = { "p5", "title" }, script =
-    "if (typeof document !== 'undefined') document.title = title;")
+    "document.title = title;")
   static native void setTitle(JSObject p5, String title);
 
 
   @JSBody(params = { "url" }, script =
-    "if (typeof window === 'undefined' || typeof window.open !== 'function') return false;" +
     "window.open(url, '_blank'); return true;")
   static native boolean openWindow(String url);
 
 
   @JSBody(params = { "p5", "path" }, script =
-    "if (!p5 || typeof p5.loadImage !== 'function') return null;" +
     "return p5.loadImage(path);")
   static native JSObject loadImage(JSObject p5, String path);
 
 
   @JSBody(params = { "p5", "width", "height" }, script =
-    "if (!p5 || typeof p5.createImage !== 'function') return null;" +
     "return p5.createImage(width, height);")
   static native JSObject createImage(JSObject p5, int width, int height);
 
 
   @JSBody(params = { "p5", "target", "name" }, script =
-    "if (!p5 || typeof p5.save !== 'function') return false;" +
     "p5.save(target, name); return true;")
   static native boolean save(JSObject p5, JSObject target, String name);
 
 
   @JSBody(params = { "image" }, script =
-    "return image && image.width ? image.width : 0;")
+    "return image.width || 0;")
   static native int imageWidth(JSObject image);
 
 
   @JSBody(params = { "image" }, script =
-    "return image && image.height ? image.height : 0;")
+    "return image.height || 0;")
   static native int imageHeight(JSObject image);
 
 
   @JSBody(params = { "image" }, script =
-    "if (image && typeof image.loadPixels === 'function') image.loadPixels();")
+    "image.loadPixels();")
   static native void imageLoadPixels(JSObject image);
 
 
   @JSBody(params = { "image" }, script =
-    "if (image && typeof image.updatePixels === 'function') image.updatePixels();")
+    "image.updatePixels();")
   static native void imageUpdatePixels(JSObject image);
 
 
   @JSBody(params = { "image", "width", "height" }, script =
-    "if (image && typeof image.resize === 'function') image.resize(width, height);")
+    "image.resize(width, height);")
   static native void imageResize(JSObject image, int width, int height);
 
 
   @JSBody(params = { "image" }, script =
-    "return image && image.pixels ? image.pixels.length : 0;")
+    "return image.pixels.length;")
   static native int imagePixelLength(JSObject image);
 
 
   @JSBody(params = { "image", "index" }, script =
-    "return image && image.pixels ? image.pixels[index] | 0 : 0;")
+    "return image.pixels[index] | 0;")
   static native int imagePixel(JSObject image, int index);
 
 
   @JSBody(params = { "image", "index", "value" }, script =
-    "if (image && image.pixels) image.pixels[index] = value & 255;")
+    "image.pixels[index] = value & 255;")
   static native void setImagePixel(JSObject image, int index, int value);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.loadPixels === 'function') p5.loadPixels();")
+    "p5.loadPixels();")
   static native void loadPixels(JSObject p5);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.updatePixels === 'function') p5.updatePixels();")
+    "p5.updatePixels();")
   static native void updatePixels(JSObject p5);
 
 
   @JSBody(params = { "p5" }, script =
-    "return p5 && p5.pixels ? p5.pixels.length : 0;")
+    "return p5.pixels.length;")
   static native int pixelLength(JSObject p5);
 
 
   @JSBody(params = { "p5", "index" }, script =
-    "return p5 && p5.pixels ? p5.pixels[index] | 0 : 0;")
+    "return p5.pixels[index] | 0;")
   static native int pixel(JSObject p5, int index);
 
 
   @JSBody(params = { "p5", "index", "value" }, script =
-    "if (p5 && p5.pixels) p5.pixels[index] = value & 255;")
+    "p5.pixels[index] = value & 255;")
   static native void setPixel(JSObject p5, int index, int value);
 
 
   @JSBody(params = { "p5", "r", "g", "b", "a" }, script =
-    "if (p5 && typeof p5.background === 'function') p5.background(r, g, b, a);")
+    "p5.background(r, g, b, a);")
   static native void background(JSObject p5, int r, int g, int b, int a);
 
 
   @JSBody(params = { "p5", "r", "g", "b", "a" }, script =
-    "if (p5 && typeof p5.fill === 'function') p5.fill(r, g, b, a);")
+    "p5.fill(r, g, b, a);")
   static native void fill(JSObject p5, int r, int g, int b, int a);
 
 
+  @JSBody(params = { "p5", "r", "g", "b", "a" }, script =
+    "p5.ambientMaterial(r, g, b, a);")
+  static native void ambientMaterial(JSObject p5, int r, int g, int b, int a);
+
+
+  @JSBody(params = { "p5", "r", "g", "b", "a" }, script =
+    "p5.specularMaterial(r, g, b, a);")
+  static native void specularMaterial(JSObject p5, int r, int g, int b, int a);
+
+
+  @JSBody(params = { "p5", "r", "g", "b", "a" }, script =
+    "p5.emissiveMaterial(r, g, b, a);")
+  static native void emissiveMaterial(JSObject p5, int r, int g, int b, int a);
+
+
+  @JSBody(params = { "p5", "shine" }, script =
+    "p5.shininess(shine);")
+  static native void shininess(JSObject p5, float shine);
+
+
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.noFill === 'function') p5.noFill();")
+    "p5.noFill();")
   static native void noFill(JSObject p5);
 
 
   @JSBody(params = { "p5", "r", "g", "b", "a" }, script =
-    "if (p5 && typeof p5.stroke === 'function') p5.stroke(r, g, b, a);")
+    "p5.stroke(r, g, b, a);")
   static native void stroke(JSObject p5, int r, int g, int b, int a);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.noStroke === 'function') p5.noStroke();")
+    "p5.noStroke();")
   static native void noStroke(JSObject p5);
 
 
   @JSBody(params = { "p5", "weight" }, script =
-    "if (p5 && typeof p5.strokeWeight === 'function') p5.strokeWeight(weight);")
+    "p5.strokeWeight(weight);")
   static native void strokeWeight(JSObject p5, float weight);
 
 
   @JSBody(params = { "p5", "cap" }, script =
-    "if (!p5 || typeof p5.strokeCap !== 'function') return;" +
     "var mode = cap === 2 ? (p5.ROUND || 'round') : cap === 4 ? (p5.PROJECT || 'square') : (p5.SQUARE || 'butt');" +
     "p5.strokeCap(mode);")
   static native void strokeCap(JSObject p5, int cap);
 
 
   @JSBody(params = { "p5", "join" }, script =
-    "if (!p5 || typeof p5.strokeJoin !== 'function') return;" +
     "var mode = join === 2 ? (p5.ROUND || 'round') : join === 32 ? (p5.BEVEL || 'bevel') : (p5.MITER || 'miter');" +
     "p5.strokeJoin(mode);")
   static native void strokeJoin(JSObject p5, int join);
 
 
   @JSBody(params = { "p5", "r", "g", "b", "a" }, script =
-    "if (p5 && typeof p5.tint === 'function') p5.tint(r, g, b, a);")
+    "p5.tint(r, g, b, a);")
   static native void tint(JSObject p5, int r, int g, int b, int a);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.noTint === 'function') p5.noTint();")
+    "p5.noTint();")
   static native void noTint(JSObject p5);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.push === 'function') p5.push();")
+    "p5.push();")
   static native void push(JSObject p5);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.pop === 'function') p5.pop();")
+    "p5.pop();")
   static native void pop(JSObject p5);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.resetMatrix === 'function') p5.resetMatrix();")
+    "p5.resetMatrix();")
   static native void resetMatrix(JSObject p5);
 
 
   @JSBody(params = { "p5", "x", "y" }, script =
-    "if (p5 && typeof p5.translate === 'function') p5.translate(x, y);")
+    "p5.translate(x, y);")
   static native void translate(JSObject p5, float x, float y);
 
 
   @JSBody(params = { "p5", "x", "y", "z" }, script =
-    "if (p5 && typeof p5.translate === 'function') p5.translate(x, y, z);")
+    "p5.translate(x, y, z);")
   static native void translate3(JSObject p5, float x, float y, float z);
 
 
   @JSBody(params = { "p5", "angle" }, script =
-    "if (p5 && typeof p5.rotate === 'function') p5.rotate(angle);")
+    "p5.rotate(angle);")
   static native void rotate(JSObject p5, float angle);
 
 
   @JSBody(params = { "p5", "angle" }, script =
-    "if (p5 && typeof p5.rotateX === 'function') p5.rotateX(angle);")
+    "p5.rotateX(angle);")
   static native void rotateX(JSObject p5, float angle);
 
 
   @JSBody(params = { "p5", "angle" }, script =
-    "if (p5 && typeof p5.rotateY === 'function') p5.rotateY(angle);")
+    "p5.rotateY(angle);")
   static native void rotateY(JSObject p5, float angle);
 
 
   @JSBody(params = { "p5", "angle" }, script =
-    "if (p5 && typeof p5.rotateZ === 'function') p5.rotateZ(angle);" +
-    "else if (p5 && typeof p5.rotate === 'function') p5.rotate(angle);")
+    "p5.rotateZ(angle);")
   static native void rotateZ(JSObject p5, float angle);
 
 
   @JSBody(params = { "p5", "x", "y" }, script =
-    "if (p5 && typeof p5.scale === 'function') p5.scale(x, y);")
+    "p5.scale(x, y);")
   static native void scale(JSObject p5, float x, float y);
 
 
   @JSBody(params = { "p5", "x", "y", "z" }, script =
-    "if (p5 && typeof p5.scale === 'function') p5.scale(x, y, z);")
+    "p5.scale(x, y, z);")
   static native void scale3(JSObject p5, float x, float y, float z);
 
 
   @JSBody(params = { "p5", "a", "b", "c", "d", "e", "f" }, script =
-    "if (p5 && typeof p5.applyMatrix === 'function') p5.applyMatrix(a, b, c, d, e, f);")
+    "p5.applyMatrix(a, b, c, d, e, f);")
   static native void applyMatrix(JSObject p5, float a, float b, float c,
                                  float d, float e, float f);
 
 
   @JSBody(params = { "p5", "n00", "n01", "n02", "n03", "n10", "n11", "n12", "n13", "n20", "n21", "n22", "n23", "n30", "n31", "n32", "n33" }, script =
-    "if (p5 && typeof p5.applyMatrix === 'function') {" +
-    "  p5.applyMatrix(n00, n01, n02, n03, n10, n11, n12, n13, n20, n21, n22, n23, n30, n31, n32, n33);" +
-    "}")
+    "p5.applyMatrix(n00, n01, n02, n03, n10, n11, n12, n13, n20, n21, n22, n23, n30, n31, n32, n33);")
   static native void applyMatrix3(JSObject p5,
                                   float n00, float n01, float n02, float n03,
                                   float n10, float n11, float n12, float n13,
@@ -476,56 +473,55 @@ final class P5Bridge {
 
 
   @JSBody(params = { "p5", "x", "y" }, script =
-    "if (p5 && typeof p5.point === 'function') p5.point(x, y);")
+    "p5.point(x, y);")
   static native void point(JSObject p5, float x, float y);
 
 
   @JSBody(params = { "p5", "x", "y", "z" }, script =
-    "if (p5 && typeof p5.point === 'function') p5.point(x, y, z);")
+    "p5.point(x, y, z);")
   static native void point3(JSObject p5, float x, float y, float z);
 
 
   @JSBody(params = { "p5", "x1", "y1", "x2", "y2" }, script =
-    "if (p5 && typeof p5.line === 'function') p5.line(x1, y1, x2, y2);")
+    "p5.line(x1, y1, x2, y2);")
   static native void line(JSObject p5, float x1, float y1, float x2, float y2);
 
 
   @JSBody(params = { "p5", "x1", "y1", "z1", "x2", "y2", "z2" }, script =
-    "if (p5 && typeof p5.line === 'function') p5.line(x1, y1, z1, x2, y2, z2);")
+    "p5.line(x1, y1, z1, x2, y2, z2);")
   static native void line3(JSObject p5, float x1, float y1, float z1,
                            float x2, float y2, float z2);
 
 
   @JSBody(params = { "p5", "x1", "y1", "x2", "y2", "x3", "y3" }, script =
-    "if (p5 && typeof p5.triangle === 'function') p5.triangle(x1, y1, x2, y2, x3, y3);")
+    "p5.triangle(x1, y1, x2, y2, x3, y3);")
   static native void triangle(JSObject p5, float x1, float y1, float x2, float y2,
                               float x3, float y3);
 
 
   @JSBody(params = { "p5", "x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4" }, script =
-    "if (p5 && typeof p5.quad === 'function') p5.quad(x1, y1, x2, y2, x3, y3, x4, y4);")
+    "p5.quad(x1, y1, x2, y2, x3, y3, x4, y4);")
   static native void quad(JSObject p5, float x1, float y1, float x2, float y2,
                           float x3, float y3, float x4, float y4);
 
 
   @JSBody(params = { "p5", "x", "y", "width", "height" }, script =
-    "if (p5 && typeof p5.rect === 'function') p5.rect(x, y, width, height);")
+    "p5.rect(x, y, width, height);")
   static native void rect(JSObject p5, float x, float y, float width, float height);
 
 
   @JSBody(params = { "p5", "x", "y", "width", "height", "tl", "tr", "br", "bl" }, script =
-    "if (p5 && typeof p5.rect === 'function') p5.rect(x, y, width, height, tl, tr, br, bl);")
+    "p5.rect(x, y, width, height, tl, tr, br, bl);")
   static native void roundedRect(JSObject p5, float x, float y, float width, float height,
                                  float tl, float tr, float br, float bl);
 
 
   @JSBody(params = { "p5", "x", "y", "width", "height" }, script =
-    "if (p5 && typeof p5.ellipse === 'function') p5.ellipse(x, y, width, height);")
+    "p5.ellipse(x, y, width, height);")
   static native void ellipse(JSObject p5, float x, float y, float width, float height);
 
 
   @JSBody(params = { "p5", "x", "y", "width", "height", "start", "stop", "mode" }, script =
-    "if (!p5 || typeof p5.arc !== 'function') return;" +
     "var arcMode = mode === 3 ? (p5.PIE || 'pie') : mode === 2 ? (p5.CHORD || 'chord') : (p5.OPEN || 'open');" +
     "p5.arc(x, y, width, height, start, stop, arcMode);")
   static native void arc(JSObject p5, float x, float y, float width, float height,
@@ -533,7 +529,6 @@ final class P5Bridge {
 
 
   @JSBody(params = { "p5", "kind" }, script =
-    "if (!p5 || typeof p5.beginShape !== 'function') return;" +
     "var mode = null;" +
     "switch (kind) {" +
     "  case 5: mode = p5.LINES || 'lines'; break;" +
@@ -549,67 +544,81 @@ final class P5Bridge {
 
 
   @JSBody(params = { "p5", "x", "y" }, script =
-    "if (p5 && typeof p5.vertex === 'function') p5.vertex(x, y);")
+    "p5.vertex(x, y);")
   static native void vertex(JSObject p5, float x, float y);
 
 
   @JSBody(params = { "p5", "x", "y", "z" }, script =
-    "if (p5 && typeof p5.vertex === 'function') p5.vertex(x, y, z);")
+    "p5.vertex(x, y, z);")
   static native void vertex3(JSObject p5, float x, float y, float z);
 
 
   @JSBody(params = { "p5", "close" }, script =
-    "if (!p5 || typeof p5.endShape !== 'function') return;" +
     "if (close) p5.endShape(p5.CLOSE || 'close'); else p5.endShape();")
   static native void endShape(JSObject p5, boolean close);
 
 
   @JSBody(params = { "p5", "nx", "ny", "nz" }, script =
-    "if (p5 && typeof p5.normal === 'function') p5.normal(nx, ny, nz);")
+    "p5.normal(nx, ny, nz);")
   static native void normal(JSObject p5, float nx, float ny, float nz);
 
 
   @JSBody(params = { "p5", "width", "height", "depth" }, script =
-    "if (p5 && typeof p5.box === 'function') p5.box(width, height, depth);")
+    "p5.box(width, height, depth);")
   static native void box(JSObject p5, float width, float height, float depth);
 
 
   @JSBody(params = { "p5", "radius", "detailX", "detailY" }, script =
-    "if (!p5 || typeof p5.sphere !== 'function') return;" +
     "if (detailX > 0 && detailY > 0) p5.sphere(radius, detailX, detailY);" +
     "else p5.sphere(radius);")
   static native void sphere(JSObject p5, float radius, int detailX, int detailY);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.lights === 'function') p5.lights();")
+    "p5.lights();")
   static native void lights(JSObject p5);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.noLights === 'function') p5.noLights();")
+    "p5.noLights();")
   static native void noLights(JSObject p5);
 
 
+  @JSBody(params = { "p5" }, script =
+    "p5.lightFalloff(1, 0, 0);" +
+    "p5.specularColor(0, 0, 0);")
+  static native void defaultLightState(JSObject p5);
+
+
   @JSBody(params = { "p5", "v1", "v2", "v3" }, script =
-    "if (p5 && typeof p5.ambientLight === 'function') p5.ambientLight(v1, v2, v3);")
+    "p5.ambientLight(v1, v2, v3);")
   static native void ambientLight(JSObject p5, float v1, float v2, float v3);
 
 
+  @JSBody(params = { "p5", "constant", "linear", "quadratic" }, script =
+    "p5.lightFalloff(constant, linear, quadratic);")
+  static native void lightFalloff(JSObject p5, float constant, float linear, float quadratic);
+
+
+  @JSBody(params = { "p5", "v1", "v2", "v3" }, script =
+    "p5.specularColor(v1, v2, v3);")
+  static native void lightSpecular(JSObject p5, float v1, float v2, float v3);
+
+
   @JSBody(params = { "p5", "v1", "v2", "v3", "x", "y", "z" }, script =
-    "if (p5 && typeof p5.pointLight === 'function') p5.pointLight(v1, v2, v3, x, y, z);")
+    "p5.pointLight(v1, v2, v3, x, y, z);")
   static native void pointLight(JSObject p5, float v1, float v2, float v3,
                                 float x, float y, float z);
 
 
   @JSBody(params = { "p5", "v1", "v2", "v3", "nx", "ny", "nz" }, script =
-    "if (p5 && typeof p5.directionalLight === 'function') p5.directionalLight(v1, v2, v3, nx, ny, nz);")
+    "p5.directionalLight(v1, v2, v3, nx, ny, nz);")
   static native void directionalLight(JSObject p5, float v1, float v2, float v3,
                                       float nx, float ny, float nz);
 
 
   @JSBody(params = { "p5", "v1", "v2", "v3", "x", "y", "z", "nx", "ny", "nz", "angle", "concentration" }, script =
-    "if (p5 && typeof p5.spotLight === 'function') p5.spotLight(v1, v2, v3, x, y, z, nx, ny, nz, angle, concentration);")
+    "p5.spotLight(v1, v2, v3, x, y, z, nx, ny, nz, angle, concentration);")
   static native void spotLight(JSObject p5, float v1, float v2, float v3,
                                float x, float y, float z,
                                float nx, float ny, float nz,
@@ -617,7 +626,7 @@ final class P5Bridge {
 
 
   @JSBody(params = { "p5", "eyeX", "eyeY", "eyeZ", "centerX", "centerY", "centerZ", "upX", "upY", "upZ" }, script =
-    "if (p5 && typeof p5.camera === 'function') p5.camera(eyeX, eyeY, eyeZ, centerX, centerY, centerZ, upX, upY, upZ);")
+    "p5.camera(eyeX, eyeY, eyeZ, centerX, centerY, centerZ, upX, upY, upZ);")
   static native void camera(JSObject p5,
                             float eyeX, float eyeY, float eyeZ,
                             float centerX, float centerY, float centerZ,
@@ -625,60 +634,53 @@ final class P5Bridge {
 
 
   @JSBody(params = { "p5", "left", "right", "bottom", "top", "near", "far" }, script =
-    "if (p5 && typeof p5.ortho === 'function') p5.ortho(left, right, bottom, top, near, far);")
+    "p5.ortho(left, right, bottom, top, near, far);")
   static native void ortho(JSObject p5, float left, float right,
                            float bottom, float top, float near, float far);
 
 
   @JSBody(params = { "p5", "fovy", "aspect", "near", "far" }, script =
-    "if (p5 && typeof p5.perspective === 'function') p5.perspective(fovy, aspect, near, far);")
+    "p5.perspective(fovy, aspect, near, far);")
   static native void perspective(JSObject p5, float fovy, float aspect,
                                  float near, float far);
 
 
   @JSBody(params = { "p5", "left", "right", "bottom", "top", "near", "far" }, script =
-    "if (p5 && typeof p5.frustum === 'function') p5.frustum(left, right, bottom, top, near, far);")
+    "p5.frustum(left, right, bottom, top, near, far);")
   static native void frustum(JSObject p5, float left, float right,
                              float bottom, float top, float near, float far);
 
 
   @JSBody(params = { "p5", "image", "x", "y", "width", "height", "sx", "sy", "sw", "sh" }, script =
-    "if (!p5 || !image || typeof p5.image !== 'function') return;" +
     "p5.image(image, x, y, width, height, sx, sy, sw, sh);")
   static native void image(JSObject p5, JSObject image, float x, float y,
                            float width, float height, int sx, int sy, int sw, int sh);
 
 
   @JSBody(params = { "p5", "text", "x", "y" }, script =
-    "if (!p5 || typeof p5.text !== 'function') return;" +
     "function java2DTextCoordinate(value) {" +
     "  value = Number(value);" +
     "  if (!isFinite(value)) return 0;" +
     "  return value < 0 ? Math.ceil(value + 0.5) : Math.floor(value + 0.5);" +
     "}" +
-    "var pushed = false;" +
-    "if (typeof p5.push === 'function') {" +
-    "  p5.push();" +
-    "  pushed = true;" +
-    "}" +
-    "if (typeof p5.noStroke === 'function') p5.noStroke();" +
+    "p5.push();" +
+    "p5.noStroke();" +
     "p5.text(text, java2DTextCoordinate(x), java2DTextCoordinate(y));" +
-    "if (pushed && typeof p5.pop === 'function') p5.pop();")
+    "p5.pop();")
   static native void text(JSObject p5, String text, float x, float y);
 
 
   @JSBody(params = { "p5", "size" }, script =
-    "if (p5 && typeof p5.textSize === 'function') p5.textSize(size);")
+    "p5.textSize(size);")
   static native void textSize(JSObject p5, float size);
 
 
   @JSBody(params = { "p5", "font" }, script =
-    "if (p5 && font && typeof p5.textFont === 'function') p5.textFont(font);")
+    "if (font) p5.textFont(font);")
   static native void textFont(JSObject p5, String font);
 
 
   @JSBody(params = { "p5", "alignX", "alignY" }, script =
-    "if (!p5 || typeof p5.textAlign !== 'function') return;" +
     "var x = alignX === 3 ? (p5.CENTER || 'center') : alignX === 39 ? (p5.RIGHT || 'right') : (p5.LEFT || 'left');" +
     "var y = alignY === 101 ? (p5.TOP || 'top') : alignY === 102 ? (p5.BOTTOM || 'bottom') :" +
     "        alignY === 3 ? (p5.CENTER || 'center') : (p5.BASELINE || 'alphabetic');" +
@@ -687,32 +689,28 @@ final class P5Bridge {
 
 
   @JSBody(params = { "p5", "text" }, script =
-    "if (!p5 || typeof p5.textWidth !== 'function') return text ? text.length * 10 : 0;" +
     "return p5.textWidth(text);")
   static native float textWidth(JSObject p5, String text);
 
 
   @JSBody(params = { "p5", "fallback" }, script =
-    "if (!p5 || typeof p5.textAscent !== 'function') return fallback;" +
     "var value = p5.textAscent();" +
     "return isFinite(value) && value > 0 ? value : fallback;")
   static native float textAscent(JSObject p5, float fallback);
 
 
   @JSBody(params = { "p5", "fallback" }, script =
-    "if (!p5 || typeof p5.textDescent !== 'function') return fallback;" +
     "var value = p5.textDescent();" +
     "return isFinite(value) && value > 0 ? value : fallback;")
   static native float textDescent(JSObject p5, float fallback);
 
 
   @JSBody(params = { "p5", "cursor" }, script =
-    "if (!p5 || typeof p5.cursor !== 'function') return;" +
     "p5.cursor(cursor);")
   static native void cursor(JSObject p5, String cursor);
 
 
   @JSBody(params = { "p5" }, script =
-    "if (p5 && typeof p5.noCursor === 'function') p5.noCursor();")
+    "p5.noCursor();")
   static native void noCursor(JSObject p5);
 }

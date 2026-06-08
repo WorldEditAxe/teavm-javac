@@ -152,7 +152,13 @@ export async function compileProcessingSketch(sources, options = {}) {
   const mapper = createProcessingMapper(preprocessed, normalizedSources);
 
   if (!preprocessed.ok) {
-    throw new ProcessingPreprocessError(preprocessed);
+    const preprocessDiagnostics = createPreprocessDiagnostics(preprocessed);
+    diagnostics.push(...preprocessDiagnostics);
+    for (const diagnostic of preprocessDiagnostics) {
+      options.onDiagnostic?.(diagnostic);
+      dispatchProcessingDiagnostic(options.diagnosticsElement, diagnostic);
+    }
+    throw new ProcessingPreprocessError(preprocessed, preprocessDiagnostics);
   }
 
   compiler.onDiagnostic((diagnostic) => {
@@ -1461,6 +1467,25 @@ function createProcessingMapper(preprocessed, sources) {
   };
 }
 
+function createPreprocessDiagnostics(preprocessed) {
+  const tabs = Array.from(preprocessed.tabs ?? []);
+  return Array.from(preprocessed.issues ?? []).map((issue) => {
+    const globalLine = Math.max(0, Number(issue.line ?? 1) - 1);
+    const column = Math.max(0, Number(issue.column ?? 0));
+    const tab = findTabAtLine(tabs, globalLine);
+    const lineNumber = tab ? globalLine - tab.lineStart + 1 : globalLine + 1;
+    return {
+      type: "processing-preprocess",
+      severity: "error",
+      fileName: tab?.path ?? preprocessed.sourceFileName ?? "sketch.pde",
+      lineNumber,
+      columnNumber: column + 1,
+      message: issue.message ?? "Processing syntax error",
+      issue,
+    };
+  });
+}
+
 function combineSources(sources) {
   return {
     content: sources.map((source) => source.content).join("\n") + "\n",
@@ -1568,6 +1593,21 @@ function findTabAtOffset(tabs, offset) {
       return tab;
     }
     if (tab.charStart <= offset) {
+      current = tab;
+    }
+  }
+  return current;
+}
+
+function findTabAtLine(tabs, line) {
+  let current = null;
+  for (let index = 0; index < tabs.length; index++) {
+    const tab = tabs[index];
+    const nextLineStart = tabs[index + 1]?.lineStart ?? tab.lineStart + tab.lineCount;
+    if (tab.lineStart <= line && line < nextLineStart) {
+      return tab;
+    }
+    if (tab.lineStart <= line) {
       current = tab;
     }
   }
@@ -2175,11 +2215,12 @@ export class ProcessingLoadError extends Error {
 }
 
 export class ProcessingPreprocessError extends Error {
-  constructor(preprocessed) {
+  constructor(preprocessed, diagnostics = createPreprocessDiagnostics(preprocessed)) {
     super(preprocessed.issues[0]?.message ?? "Processing preprocessing failed");
     this.name = "ProcessingPreprocessError";
     this.preprocessed = preprocessed;
     this.issues = preprocessed.issues;
+    this.diagnostics = diagnostics;
   }
 }
 

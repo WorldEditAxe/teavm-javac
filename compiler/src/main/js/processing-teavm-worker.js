@@ -116,6 +116,7 @@ function serializeError(error) {
     message: error?.message ?? String(error),
     stack: error?.stack,
     diagnostics: error?.diagnostics ?? [],
+    issues: error?.issues ?? [],
     preprocessed: error?.preprocessed,
   };
 }

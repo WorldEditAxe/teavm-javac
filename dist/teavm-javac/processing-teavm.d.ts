@@ -166,7 +166,8 @@ export class ProcessingLoadError extends Error {
 export class ProcessingPreprocessError extends Error {
   readonly preprocessed: ProcessingPreprocessResult;
   readonly issues: ProcessingPreprocessResult["issues"];
-  constructor(preprocessed: ProcessingPreprocessResult);
+  readonly diagnostics: ProcessingDiagnostic[];
+  constructor(preprocessed: ProcessingPreprocessResult, diagnostics?: ProcessingDiagnostic[]);
 }
 
 export class ProcessingCompileError extends Error {

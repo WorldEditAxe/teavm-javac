@@ -1014,7 +1014,9 @@ public class PreprocessIssueMessageSimplifier {
     private DefaultErrorLocalStrSet() {
       localizations.put("editor.status.error", "Error");
       localizations.put("editor.status.error.syntax", "Syntax Error - %s");
+      localizations.put("editor.status.error_on", "Error on %s");
       localizations.put("editor.status.bad.assignment", "Error on variable assignment near %s?");
+      localizations.put("editor.status.bad.generic", "Error on generic declaration near %s?");
       localizations.put("editor.status.bad.identifier", "Identifier cannot start with digits near %s?");
       localizations.put("editor.status.bad.parameter", "Error on parameter or method declaration near %s?");
       localizations.put("editor.status.extraneous", "Unexpected extra code near %s?");
