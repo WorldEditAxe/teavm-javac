@@ -69,6 +69,7 @@ public class Canvas2DSurface extends PSurfaceNone {
   @Override
   public void initFrame(PApplet sketch) {
     this.sketch = sketch;
+    sketch.hint(PConstants.ENABLE_KEY_REPEAT);
     Canvas2DBridge.noLoop(host());
     renderer = Canvas2DBridge.createCanvas(host(), sketch.sketchWidth(), sketch.sketchHeight());
     graphics.setSize(sketch.sketchWidth(), sketch.sketchHeight());

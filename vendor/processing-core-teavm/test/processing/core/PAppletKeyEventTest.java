@@ -17,6 +17,19 @@ public class PAppletKeyEventTest {
 
     private PApplet applet;
 
+    private static class CountingApplet extends PApplet {
+        int keyPressCount;
+
+        void setKeyRepeat(boolean enabled) {
+            keyRepeatEnabled = enabled;
+        }
+
+        @Override
+        public void keyPressed(KeyEvent event) {
+            keyPressCount++;
+        }
+    }
+
     @Before
     public void setup() {
         applet = new PApplet();
@@ -126,6 +139,36 @@ public class PAppletKeyEventTest {
 
         Assert.assertFalse("keyPressed should be false after key release", applet.keyPressed);
         Assert.assertEquals("pressedKeys should be empty", true, applet.pressedKeys.isEmpty());
+    }
+
+    @Test
+    public void testAutoRepeatInvokesKeyPressedWhenEnabled() {
+        CountingApplet applet = new CountingApplet();
+        applet.setKeyRepeat(true);
+
+        KeyEvent pressT = new KeyEvent(null, 0L, KeyEvent.PRESS, 0, 't', 84, false);
+        applet.handleKeyEvent(pressT);
+
+        KeyEvent repeatT = new KeyEvent(null, 0L, KeyEvent.PRESS, 0, 't', 84, true);
+        applet.handleKeyEvent(repeatT);
+
+        Assert.assertEquals("keyPressed() should be called for the press and repeat", 2, applet.keyPressCount);
+        Assert.assertEquals("pressedKeys should still have one physical key", 1, applet.pressedKeys.size());
+    }
+
+    @Test
+    public void testAutoRepeatDoesNotInvokeKeyPressedWhenDisabled() {
+        CountingApplet applet = new CountingApplet();
+        applet.setKeyRepeat(false);
+
+        KeyEvent pressT = new KeyEvent(null, 0L, KeyEvent.PRESS, 0, 't', 84, false);
+        applet.handleKeyEvent(pressT);
+
+        KeyEvent repeatT = new KeyEvent(null, 0L, KeyEvent.PRESS, 0, 't', 84, true);
+        applet.handleKeyEvent(repeatT);
+
+        Assert.assertEquals("keyPressed() should ignore auto-repeat when disabled", 1, applet.keyPressCount);
+        Assert.assertEquals("pressedKeys should still have one physical key", 1, applet.pressedKeys.size());
     }
 
     @Test

@@ -835,7 +835,8 @@ public class PGraphicsP5 extends PGraphics {
   @Override
   public void textAlign(int alignX, int alignY) {
     super.textAlign(alignX, alignY);
-    P5Bridge.textAlign(p5(), alignX, alignY);
+    // PGraphics prepositions each text line for alignment before calling textLineImpl().
+    P5Bridge.textAlign(p5(), LEFT, BASELINE);
   }
 
 

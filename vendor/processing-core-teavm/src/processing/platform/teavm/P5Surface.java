@@ -69,6 +69,7 @@ public class P5Surface extends PSurfaceNone {
   @Override
   public void initFrame(PApplet sketch) {
     this.sketch = sketch;
+    sketch.hint(PConstants.ENABLE_KEY_REPEAT);
     P5Bridge.noLoop(p5());
     boolean webgl = graphics instanceof PGraphicsP5 && ((PGraphicsP5) graphics).isWebGL();
     renderer = P5Bridge.createCanvas(p5(), sketch.sketchWidth(), sketch.sketchHeight(), webgl);
