@@ -72,6 +72,7 @@ public class P5Surface extends PSurfaceNone {
     sketch.hint(PConstants.ENABLE_KEY_REPEAT);
     P5Bridge.noLoop(p5());
     boolean webgl = graphics instanceof PGraphicsP5 && ((PGraphicsP5) graphics).isWebGL();
+    P5Bridge.pixelDensity(p5(), sketch.sketchPixelDensity());
     renderer = P5Bridge.createCanvas(p5(), sketch.sketchWidth(), sketch.sketchHeight(), webgl);
     graphics.setSize(sketch.sketchWidth(), sketch.sketchHeight());
     mouseInputCallback = this::postMouseEvent;
@@ -94,6 +95,7 @@ public class P5Surface extends PSurfaceNone {
 
   @Override
   public void setSize(int width, int height) {
+    P5Bridge.pixelDensity(p5(), sketch.sketchPixelDensity());
     P5Bridge.resizeCanvas(p5(), width, height);
     super.setSize(width, height);
   }

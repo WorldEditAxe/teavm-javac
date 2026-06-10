@@ -195,6 +195,30 @@ def buildTeaVMClassLib = tasks.register("buildTeaVMClassLib", JavaExec) {
     mainClass = "org.teavm.javac.ArchiveBuilder"
 }
 
+def npmSourceDir = layout.projectDirectory.dir("src/main/js")
+def npmOutputDir = layout.buildDirectory.dir("generated/npm")
+
+def installNpmDependencies = tasks.register("installNpmDependencies", Exec) {
+    group "build"
+    inputs.file npmSourceDir.file("package.json")
+    outputs.dir npmSourceDir.dir("node_modules")
+    workingDir npmSourceDir.asFile
+    commandLine "npm", "install"
+}
+
+def compileNpmWrapper = tasks.register("compileNpmWrapper", Exec) {
+    group "build"
+    dependsOn installNpmDependencies
+    inputs.files fileTree(npmSourceDir.asFile) {
+        include "*.ts"
+        include "package.json"
+        include "tsconfig.json"
+    }
+    outputs.dir npmOutputDir
+    workingDir npmSourceDir.asFile
+    commandLine "npm", "run", "build"
+}
+
 def wasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc")
 def optimizedWasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc-optimized")
 
@@ -254,10 +278,17 @@ build {
 
 def createDist = tasks.register("createDist", Zip) {
     group "build"
-    dependsOn generateJavaScript, optimizeWasmGC
+    dependsOn generateJavaScript, optimizeWasmGC, compileNpmWrapper
     from buildTeaVMClassLib
     from generateClassLib
-    from "src/main/js"
+    from(npmSourceDir) {
+        include "package.json"
+        include "tsconfig.json"
+    }
+    from(npmOutputDir) {
+        include "*.js"
+        include "*.d.ts"
+    }
     from layout.buildDirectory.dir("generated/teavm/js")
     from(wasmGcOutputDir) {
         exclude "*.wasm"
@@ -267,6 +298,33 @@ def createDist = tasks.register("createDist", Zip) {
     }
     exclude "src/**"
     archiveBaseName = "dist"
+}
+
+def npmPackageDir = rootProject.layout.buildDirectory.dir("npm-package")
+def npmTarballDir = rootProject.layout.projectDirectory.dir("dist/npm")
+
+def prepareNpmPackage = tasks.register("prepareNpmPackage", Sync) {
+    group "distribution"
+    description "Unpacks the compiler distribution into an npm package staging directory."
+    dependsOn createDist
+    from(createDist.map { zipTree(it.archiveFile) })
+    into npmPackageDir
+}
+
+def packNpmPackage = tasks.register("packNpmPackage", Exec) {
+    group "distribution"
+    description "Creates a local npm-installable tarball in dist/npm without publishing it."
+    dependsOn prepareNpmPackage
+    inputs.dir npmPackageDir
+    outputs.dir npmTarballDir
+    doFirst {
+        delete fileTree(npmTarballDir.asFile) {
+            include "*.tgz"
+        }
+        npmTarballDir.asFile.mkdirs()
+    }
+    workingDir npmPackageDir.get().asFile
+    commandLine "npm", "pack", ".", "--pack-destination", npmTarballDir.asFile.absolutePath
 }
 
 artifacts.add("dist", createDist)

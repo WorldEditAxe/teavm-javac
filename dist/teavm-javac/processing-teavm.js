@@ -14,6 +14,32 @@ const OUTPUT_WASM_GC = "wasm-gc";
 let coreArchivePromise = null;
 let nextWorkerRequestId = 1;
 
+function imageDataToProcessingPixels(imageData) {
+  const rgba = imageData.data;
+  const pixels = new Int32Array(imageData.width * imageData.height);
+  for (let src = 0, dest = 0; src < rgba.length; src += 4, dest++) {
+    pixels[dest] = (
+      (rgba[src + 3] << 24) |
+      (rgba[src] << 16) |
+      (rgba[src + 1] << 8) |
+      rgba[src + 2]
+    );
+  }
+  return pixels;
+}
+
+function processingPixelsToImageData(pixels, imageData) {
+  const rgba = imageData.data;
+  const count = Math.min(pixels?.length ?? 0, imageData.width * imageData.height);
+  for (let src = 0, dest = 0; src < count; src++, dest += 4) {
+    const pixel = pixels[src];
+    rgba[dest] = (pixel >>> 16) & 0xff;
+    rgba[dest + 1] = (pixel >>> 8) & 0xff;
+    rgba[dest + 2] = pixel & 0xff;
+    rgba[dest + 3] = (pixel >>> 24) & 0xff;
+  }
+}
+
 export async function runProcessingSketches(options = {}) {
   const root = options.root ?? document;
   const selector = options.selector ?? "processing";
@@ -768,13 +794,14 @@ export function createCanvas2DBackend(parent, options = {}) {
     loadPixels() {
       const context = context2d();
       state.imageData = context.getImageData(0, 0, state.canvas.width, state.canvas.height);
-      backend.pixels = state.imageData.data;
+      backend.pixels = imageDataToProcessingPixels(state.imageData);
     },
 
     updatePixels() {
       if (!state.imageData) {
         return;
       }
+      processingPixelsToImageData(backend.pixels, state.imageData);
       context2d().putImageData(state.imageData, 0, 0);
     },
 
@@ -2053,13 +2080,14 @@ function createNativeImage(ownerDocument, width, height) {
     loadPixels() {
       const context = canvas.getContext("2d");
       image.imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-      image.pixels = image.imageData.data;
+      image.pixels = imageDataToProcessingPixels(image.imageData);
     },
 
     updatePixels() {
       if (!image.imageData) {
         return;
       }
+      processingPixelsToImageData(image.pixels, image.imageData);
       canvas.getContext("2d").putImageData(image.imageData, 0, 0);
     },
 

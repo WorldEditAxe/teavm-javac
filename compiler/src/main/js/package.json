@@ -4,6 +4,10 @@
   "description": "Browser Java and Processing compiler powered by javac and TeaVM.",
   "type": "module",
   "types": "./teavm-javac.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
   "sideEffects": false,
   "files": [
     "*.js",
@@ -16,6 +20,9 @@
     "package.json",
     "tsconfig.json"
   ],
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
   "exports": {
     ".": {
       "types": "./teavm-javac.d.ts",
