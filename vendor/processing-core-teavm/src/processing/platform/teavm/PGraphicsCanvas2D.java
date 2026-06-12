@@ -324,6 +324,13 @@ public class PGraphicsCanvas2D extends PGraphics {
   protected void imageImpl(PImage image,
                            float x1, float y1, float x2, float y2,
                            int u1, int v1, int u2, int v2) {
+    if (image instanceof Canvas2DImage) {
+      ((Canvas2DImage) image).syncSize();
+      if (u1 == 0 && v1 == 0 && u2 == 0 && v2 == 0) {
+        u2 = image.width;
+        v2 = image.height;
+      }
+    }
     Object nativeImage = Canvas2DPlatformRuntime.current().getNativeImage(image);
     if (nativeImage instanceof JSObject) {
       Canvas2DBridge.image(host(), (JSObject) nativeImage, x1, y1, x2 - x1, y2 - y1,

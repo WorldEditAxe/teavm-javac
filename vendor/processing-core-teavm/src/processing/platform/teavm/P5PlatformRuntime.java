@@ -24,6 +24,7 @@ package processing.platform.teavm;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -233,13 +234,31 @@ public class P5PlatformRuntime implements PlatformRuntime {
 
   @Override
   public PImage loadImage(PApplet sketch, String path, Object... args) {
-    JSObject nativeImage = P5Bridge.loadImage(p5(), path);
+    String imagePath = loadImagePath(sketch, path);
+    if (imagePath == null) {
+      return null;
+    }
+    JSObject nativeImage = P5Bridge.loadImage(p5(), imagePath);
     if (nativeImage == null) {
       return null;
     }
     P5Image image = new P5Image(nativeImage);
     image.parent = sketch;
     return image;
+  }
+
+
+  private String loadImagePath(PApplet sketch, String path) {
+    try (InputStream input = sketch.createInput(path)) {
+      if (input == null) {
+        System.err.println("The image " + path + " could not be found.");
+        return null;
+      }
+      return FileAssetBridge.loadImage(path, PApplet.loadBytes(input));
+    } catch (IOException e) {
+      e.printStackTrace();
+      return null;
+    }
   }
 
 

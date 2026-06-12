@@ -36,10 +36,8 @@ import processing.event.MouseEvent;
 
 public class P5Surface extends PSurfaceNone {
   private JSObject renderer;
-  private P5Bridge.AnimationFrameCallback frameCallback;
   private P5Bridge.MouseInputCallback mouseInputCallback;
   private P5Bridge.KeyInputCallback keyInputCallback;
-  private double frameRequest = -1;
   private double lastFrameMillis = -1;
   private boolean running;
 
@@ -188,9 +186,8 @@ public class P5Surface extends PSurfaceNone {
     }
 
     running = true;
-    frameCallback = this::onAnimationFrame;
     sketch.start();
-    frameRequest = P5Bridge.requestAnimationFrame(frameCallback);
+    new Thread(this::runFrameLoop, "Processing Animation").start();
   }
 
 
@@ -200,10 +197,6 @@ public class P5Surface extends PSurfaceNone {
       return false;
     }
     running = false;
-    if (frameRequest >= 0) {
-      P5Bridge.cancelAnimationFrame(frameRequest);
-      frameRequest = -1;
-    }
     return true;
   }
 
@@ -226,9 +219,18 @@ public class P5Surface extends PSurfaceNone {
   }
 
 
-  private void onAnimationFrame(double timeMillis) {
+  private void runFrameLoop() {
+    while (running) {
+      if (!onAnimationFrame(P5Bridge.nextAnimationFrame())) {
+        break;
+      }
+    }
+  }
+
+
+  private boolean onAnimationFrame(double timeMillis) {
     if (!running) {
-      return;
+      return false;
     }
 
     if (sketch.finished) {
@@ -236,7 +238,7 @@ public class P5Surface extends PSurfaceNone {
       if (sketch.exitCalled()) {
         sketch.exitActual();
       }
-      return;
+      return false;
     }
 
     if (!paused && shouldDraw(timeMillis)) {
@@ -244,7 +246,7 @@ public class P5Surface extends PSurfaceNone {
       sketch.handleDraw();
       lastFrameMillis = timeMillis;
     }
-    frameRequest = P5Bridge.requestAnimationFrame(frameCallback);
+    return true;
   }
 
 

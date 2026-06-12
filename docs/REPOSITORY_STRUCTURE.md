@@ -14,8 +14,10 @@ This repository is organized around the browser compiler artifact and the inputs
 - `compiler/src/main/js/` - ES module and TypeScript declaration wrappers shipped with the distribution.
 - `compiler/src/main/resources/` - service registrations and runtime resources.
 - `compiler/src/classlibEmu/java/` - class library emulation classes packed into the compile-time classlib.
+- `compiler/src/runtimeClasslibEmu/java/` - runtime-only TeaVM classlib emulation, including Java file API bridge classes.
+- `compiler/src/sharedClasslibEmu/` - emulation sources shared by compile-time and runtime classlib packaging.
 - `compiler/src/teavm/java/` - TeaVM-specific replacement classes used by TeaVM tasks.
-- `compiler/src/patches/java/` - local TeaVM/Rhino/classlib patch sources kept separate from project code.
+- `compiler/src/patches/java/` - local TeaVM/Rhino/classlib/backend patch sources kept separate from project code.
 - `compiler/src/vendor/java/` - embedded third-party Processing preprocessor and ANTLR compatibility sources.
 
 ## Supporting Trees

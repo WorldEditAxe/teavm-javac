@@ -6,11 +6,35 @@ Unlike the original project, this fork is written to be more developer-oriented 
 
 ## Building
 
-```
+Build prerequisites:
+
+- JDK 25 installed and selected by `JAVA_HOME` or `PATH`. Gradle compiles the
+  project with Java 25 source/target.
+- Network access on the first build. The `javac` module downloads OpenJDK 25
+  sources from `github.com/openjdk/jdk25u`.
+- Binaryen `wasm-opt` installed. `:compiler:createDist` runs `wasm-opt -O4` over
+  the generated Wasm-GC compiler. Put `wasm-opt` on `PATH`, or set `WASM_OPT` to
+  the executable path.
+
+```sh
 ./gradlew :compiler:createDist
 ```
 
 Resulting library archive can be found at `compiler/build/distributions/dist.zip`.
+The checked-in `dist/teavm-javac/` folder is the unpacked browser/package
+distribution used by the examples.
+
+When changing the vendored Processing core, rebuild and copy its jar before the
+compiler distribution build:
+
+```sh
+./gradlew -p vendor/processing-core-teavm clean jar
+cp vendor/processing-core-teavm/build/processing-core-teavm.jar compiler/src/main/js/processing-core-teavm.jar
+cp vendor/processing-core-teavm/build/processing-core-teavm.jar dist/teavm-javac/processing-core-teavm.jar
+WASM_OPT=/path/to/wasm-opt ./gradlew :compiler:createDist
+```
+
+Use the last command without `WASM_OPT=...` if `wasm-opt` is already on `PATH`.
 
 ## Repository layout
 
@@ -208,8 +232,170 @@ const teavm = await load(wasmBytes);
 const rawCompiler = teavm.exports.createCompiler();
 ```
 
+For emitted Java Wasm programs, prefer the runtime helpers instead of calling
+`runtime.exports.main(...)` directly. File opens can suspend and resume through
+TeaVM async methods, and direct `main(...)` calls do not provide a reliable
+"program finished" lifecycle for workers.
+
+```js
+import { createCompiler, runJavaWasm } from "./teavm-javac.js";
+
+const compiler = await createCompiler();
+compiler.addSource("Main.java", `
+import java.io.File;
+import java.util.Scanner;
+
+public class Main {
+  public static void main(String[] args) throws Exception {
+    Scanner scanner = new Scanner(new File("data.txt"));
+    while (scanner.hasNextLine()) {
+      System.out.println(scanner.nextLine());
+    }
+    scanner.close();
+  }
+}
+`);
+
+if (!compiler.compile()) {
+  throw new Error("Java compilation failed");
+}
+
+const wasm = compiler.emitWasm({
+  mainClass: "Main",
+  optimizationLevel: "simple",
+});
+
+await runJavaWasm(wasm.bytes, {
+  args: [],
+  onFinish: () => {
+    console.log("Java main finished");
+  },
+});
+```
+
+If you need to load the Wasm runtime yourself, use `loadJavaWasm(...)` and then
+`runJavaMain(...)`:
+
+```js
+import { loadJavaWasm, runJavaMain } from "./teavm-javac.js";
+
+const runtime = await loadJavaWasm(wasmBytes);
+await runJavaMain(runtime, [], {
+  onFinish: () => console.log("finished"),
+});
+```
+
+Runtime file behavior:
+
+- Raw Java file APIs use the requested path exactly. `new File("data.txt")`
+  opens `data.txt`; the Java layer does not add `data/`.
+- Reads are implemented through TeaVM async coroutine imports and browser
+  `fetch(path)`. The returned bytes are loaded into TeaVM's virtual file system
+  before Java file APIs continue.
+- Writes and closes are synchronous at the Java/JS boundary.
+- Missing files from Java file APIs surface as Java file errors such as
+  `FileNotFoundException`.
+
+The Java runtime helper exports are:
+
+```ts
+loadJavaWasm(wasmBytes, options?): Promise<runtime>
+runJavaMain(runtime, args?, options?): Promise<{ runtime }>
+runJavaWasm(wasmBytes, options?): Promise<{ runtime }>
+setActiveRuntime(runtime): runtime
+```
+
+`runJavaMain` and `runJavaWasm` accept `onFinish` and `timeoutMs`.
+
 In a more complex scenario, you can re-use existing compiler instance without passing SDK and classlib again.
 This should also make repeated compilation faster, since compilers can re-use results of previous builds.
+
+### Processing runtime
+
+Use the Processing module for `.pde` sketches:
+
+```js
+import { runProcessingElement } from "./processing-teavm.js";
+
+await runProcessingElement(document.querySelector("processing"), {
+  backend: "canvas2d",
+  output: "wasm-gc",
+});
+```
+
+For manual mounting:
+
+```js
+import {
+  createCanvas2DBackend,
+  generateProcessingSketch,
+  setActiveRuntime,
+} from "./processing-teavm.js";
+
+const generated = await generateProcessingSketch([
+  {
+    path: "Sketch.pde",
+    content: `
+PImage img;
+
+void setup() {
+  size(200, 200);
+  img = loadImage("image.png");
+}
+
+void draw() {
+  background(255);
+  image(img, 50, 50, 100, 100);
+}
+`,
+  },
+], {
+  backend: "canvas2d",
+  output: "wasm-gc",
+});
+
+const runtimeModule = await import("./compiler.wasm-runtime.js");
+const runtime = await runtimeModule.load(generated.wasmBytes);
+setActiveRuntime(runtime);
+
+const backend = createCanvas2DBackend(document.body, {});
+const sketch = runtime.exports.start(backend);
+```
+
+There is no external `fs` object to install. The generated Wasm runtime imports
+the file bridge automatically, and `setActiveRuntime(runtime)` only marks which
+TeaVM runtime should receive async file completions.
+
+Processing file and asset behavior:
+
+- `createInput("name.ext")` follows Processing lookup behavior. It tries the
+  sketch `data/` location first and then the provided path.
+- Raw Java file APIs do not do this Processing `data/` lookup.
+- `loadImage(...)`, `loadFont(...)`, `createInput(...)`, and image/font decode
+  all go through the same file-read path.
+- `loadImage(...)` returns `null` for missing images and prints
+  `The image <path> could not be found.`, matching Processing behavior.
+- `PImage.pixels[]` is a staging array. `loadPixels()` copies native image data
+  into `pixels[]`; edits to `pixels[]` affect drawing/saving only after
+  `updatePixels()`.
+- Image-level operations such as `resize()`, `get()`, `set()`, `copy()`,
+  `mask()`, `filter()`, `blend()`, and `save()` synchronize with the native
+  decoded image at the method boundary.
+
+The Processing module exports the high-level runners and lower-level building
+blocks:
+
+```ts
+runProcessingSketches(options?): Promise<ProcessingRunResult[]>
+runProcessingElement(element, options?, index?): Promise<ProcessingRunResult>
+compileProcessingSketch(sources, options?): Promise<ProcessingCompileResult>
+generateProcessingSketch(sources, options?): Promise<ProcessingGeneratedSketch>
+emitProcessingSketch(compiled, options?): ProcessingGeneratedSketch
+emitProcessingSketchWithFallback(compiled, options?): Promise<ProcessingGeneratedSketch>
+preprocessProcessing(sources, options?): Promise<ProcessingPreprocessResult>
+createCanvas2DBackend(parent, options?): ProcessingCanvas2DBackend
+setActiveRuntime(runtime): runtime
+```
 
 ### Using simple worker
 
@@ -285,11 +471,12 @@ where `compiler-diagnostic` stands for "Java compiler diagnostic" and `diagnosti
 
 ### Building library from sources
 
-You need Java 25 installed on your machine.
+You need the same prerequisites listed in [Building](#building): JDK 25,
+network access for the first OpenJDK source download, and Binaryen `wasm-opt`.
 
 Run
 
-```
+```sh
 ./gradlew :compiler:createDist
 ```
 

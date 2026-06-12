@@ -158,6 +158,13 @@ export interface Canvas2DBackendOptions {
   crossOrigin?: string | false;
 }
 
+export interface ProcessingCanvas2DBackend {
+  canvas: HTMLCanvasElement | null;
+  [key: string]: unknown;
+}
+
+export function setActiveRuntime<T>(runtime: T): T;
+
 export class ProcessingLoadError extends Error {
   readonly element: Element | null;
   constructor(element: Element | null, message: string);
@@ -209,7 +216,7 @@ export function preprocessProcessing(
   sources: Array<string | ProcessingSource>,
   options?: ProcessingCompileOptions
 ): Promise<ProcessingPreprocessResult>;
-export function createCanvas2DBackend(parent: Element, options?: Canvas2DBackendOptions): unknown;
+export function createCanvas2DBackend(parent: Element, options?: Canvas2DBackendOptions): ProcessingCanvas2DBackend;
 export const createCanvas2DHost: typeof createCanvas2DBackend;
 export function composeTeaVmSourceMap(
   compilerSourceMapText: string | null | undefined,

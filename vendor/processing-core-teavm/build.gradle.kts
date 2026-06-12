@@ -37,6 +37,8 @@ sourceSets{
 dependencies {
     implementation(files("library/jogl-all.jar", "library/gluegen-rt.jar"))
     compileOnly("org.teavm:teavm-jso:0.14.1")
+    compileOnly("org.teavm:teavm-jso-apis:0.14.1")
+    compileOnly("org.teavm:teavm-interop:0.14.1")
 
     testImplementation("junit:junit:4.13.2")
 }

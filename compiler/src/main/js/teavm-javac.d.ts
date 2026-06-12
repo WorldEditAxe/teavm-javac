@@ -149,6 +149,7 @@ export interface EmitJsOptions {
   optimization?: TeaVMOptimizationLevel;
   fastGlobalAnalysis?: boolean;
   fastDependencyAnalysis?: boolean;
+  runtimeModule?: boolean;
 }
 
 export interface EmitJsResult {
@@ -191,6 +192,35 @@ export class JavaCompiler {
 }
 
 export function createCompiler(options?: CreateCompilerOptions): Promise<JavaCompiler>;
+export function setActiveRuntime<T>(runtime: T): T;
+export function loadJavaWasm(
+  wasmBytes: BinaryInput,
+  options?: {
+    runtimeModule?: { load(wasmBytes: BinaryInput, options?: Record<string, unknown>): Promise<unknown> };
+    wasmRuntime?: string | URL;
+    wasmRuntimeUrl?: string | URL;
+    wasmRuntimeOptions?: Record<string, unknown>;
+    runtimeOptions?: Record<string, unknown>;
+  }
+): Promise<unknown>;
+export function runJavaMain(
+  runtime: unknown,
+  args?: string[],
+  options?: { onFinish?: (result: { runtime: unknown }) => void; timeoutMs?: number }
+): Promise<{ runtime: unknown }>;
+export function runJavaWasm(
+  wasmBytes: BinaryInput,
+  options?: {
+    args?: string[];
+    onFinish?: (result: { runtime: unknown }) => void;
+    timeoutMs?: number;
+    runtimeModule?: { load(wasmBytes: BinaryInput, options?: Record<string, unknown>): Promise<unknown> };
+    wasmRuntime?: string | URL;
+    wasmRuntimeUrl?: string | URL;
+    wasmRuntimeOptions?: Record<string, unknown>;
+    runtimeOptions?: Record<string, unknown>;
+  }
+): Promise<{ runtime: unknown }>;
 export function installWorker(options?: CompilerRuntimeLoadOptions): Promise<CompilerRuntime>;
 export function loadCompilerRuntime(
   input?: string | URL | CompilerRuntime | CompilerRuntimeExports | CompilerRuntimeLoadOptions

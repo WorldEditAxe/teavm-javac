@@ -14,6 +14,9 @@ const OUTPUT_WASM_GC = "wasm-gc";
 let coreArchivePromise = null;
 let nextWorkerRequestId = 1;
 
+globalThis.__teavmInstallFileImports = installTeaVmFileImports;
+installGlobalTeaVmFileModule();
+
 export async function runProcessingSketches(options = {}) {
   const root = options.root ?? document;
   const selector = options.selector ?? "processing";
@@ -116,10 +119,11 @@ export async function runProcessingElement(element, options = {}, index = 0) {
 }
 
 export async function generateProcessingSketch(sources, options = {}) {
+  const normalizedSources = normalizeSources(sources);
   if (shouldUseProcessingWorker(options)) {
-    return await generateProcessingSketchInWorker(sources, options);
+    return await generateProcessingSketchInWorker(normalizedSources, options);
   }
-  return await generateProcessingSketchOnMainThread(sources, options);
+  return await generateProcessingSketchOnMainThread(normalizedSources, options);
 }
 
 export async function generateProcessingSketchOnMainThread(sources, options = {}) {
@@ -247,6 +251,7 @@ function emitProcessingJavaScript(compiled, options) {
     fileName: DEFAULT_JS_FILE,
     sourceMap: options.sourceMaps !== false,
     sourceMapName,
+    runtimeModule: false,
     optimizationLevel: options.optimizationLevel ?? options.optimization ?? "simple",
     fastGlobalAnalysis: resolveFastGlobalAnalysis(options, OUTPUT_JS, false),
   });
@@ -256,7 +261,14 @@ function emitProcessingJavaScript(compiled, options) {
   }
 
   const sourceMap = composeTeaVmSourceMap(emitted.sourceMapText, compiled.mapper, compiled.preprocessed);
-  const moduleText = inlineSourceMap(emitted.text, sourceMap);
+  const moduleText = inlineSourceMap(
+    `${emitted.text}\n`
+      + `export function setActiveRuntime(runtime) {\n`
+      + `  globalThis.__teavmActiveRuntime = runtime || null;\n`
+      + `  return runtime;\n`
+      + `}\n`,
+    sourceMap
+  );
   return {
     output: "js",
     moduleText,
@@ -315,6 +327,7 @@ async function mountGeneratedSketch(generated, element, options) {
   const moduleUrl = URL.createObjectURL(new Blob([generated.moduleText], { type: "text/javascript" }));
   try {
     const module = await import(moduleUrl);
+    module.setActiveRuntime?.(module);
     const mounted = await mountSketch(element, module.start, options);
     return {
       element,
@@ -353,10 +366,9 @@ async function mountGeneratedWasmSketch(generated, element, options) {
     throw new ProcessingLoadError(element, "TeaVM Wasm-GC runtime loader did not export load()");
   }
 
-  const wasmRuntime = await runtimeModule.load(
-    generated.wasmBytes,
-    options.sketchWasmRuntimeOptions ?? options.wasmRuntimeOptions ?? options.runtimeOptions ?? {}
-  );
+  const wasmRuntimeOptions = createWasmRuntimeOptions(options);
+  const wasmRuntime = await runtimeModule.load(generated.wasmBytes, wasmRuntimeOptions);
+  setActiveRuntime(wasmRuntime);
   const start = wasmRuntime?.exports?.start;
   if (typeof start !== "function") {
     throw new ProcessingLoadError(element, "Processing Wasm-GC sketch did not export start(runtime)");
@@ -525,6 +537,12 @@ function serializeCompiledSketch(compiled) {
   };
 }
 
+export function setActiveRuntime(runtime) {
+  globalThis.__teavmActiveRuntime = runtime || null;
+  installGlobalTeaVmFileModule();
+  return runtime;
+}
+
 function createWorkerError(details = {}) {
   const error = new Error(details.message ?? "Processing worker failed");
   error.name = details.name ?? "ProcessingWorkerError";
@@ -675,6 +693,513 @@ async function mountCanvas2DSketch(element, start, options) {
     canvas: canvasBackend.canvas,
     sketch,
   };
+}
+
+function createWasmRuntimeOptions(options = {}) {
+  const baseOptions = options.sketchWasmRuntimeOptions ?? options.wasmRuntimeOptions ?? options.runtimeOptions ?? {};
+  return {
+    ...baseOptions,
+    installImports(imports) {
+      baseOptions.installImports?.(imports);
+      installTeaVmFileImports(imports);
+    },
+  };
+}
+
+function installTeaVmFileImports(imports) {
+  imports.teavmFile ??= {};
+  const fileImports = createTeaVmFileImportModule();
+  imports.teavmFile.setActiveRuntime ??= fileImports.setActiveRuntime;
+  imports.teavmFile.open ??= fileImports.open;
+  imports.teavmFile.openAsyncStart ??= fileImports.openAsyncStart;
+  imports.teavmFile.write ??= fileImports.write;
+  imports.teavmFile.writeSync ??= fileImports.writeSync;
+  imports.teavmFile.close ??= fileImports.close;
+  imports.teavmFile.closeSync ??= fileImports.closeSync;
+  imports.teavmFile.loadImageAsyncStart ??= fileImports.loadImageAsyncStart;
+  imports.teavmFile.loadFontAsyncStart ??= fileImports.loadFontAsyncStart;
+  imports.teavmFile.errorResult ??= fileImports.errorResult;
+  imports.teavmFile.storeOperationBytes ??= fileImports.storeOperationBytes;
+  imports.teavmFile.operationBytes ??= fileImports.operationBytes;
+  imports.teavmFile.operationByteLength ??= fileImports.operationByteLength;
+  imports.teavmFile.operationByteAt ??= fileImports.operationByteAt;
+  imports.teavmFile.releaseOperationBytes ??= fileImports.releaseOperationBytes;
+}
+
+function installGlobalTeaVmFileModule() {
+  const fileImports = createTeaVmFileImportModule();
+  globalThis.teavmFile ??= {};
+  globalThis.teavmFile.setActiveRuntime ??= fileImports.setActiveRuntime;
+  globalThis.teavmFile.open ??= fileImports.open;
+  globalThis.teavmFile.openAsyncStart ??= fileImports.openAsyncStart;
+  globalThis.teavmFile.write ??= fileImports.write;
+  globalThis.teavmFile.writeSync ??= fileImports.writeSync;
+  globalThis.teavmFile.close ??= fileImports.close;
+  globalThis.teavmFile.closeSync ??= fileImports.closeSync;
+  globalThis.teavmFile.loadImageAsyncStart ??= fileImports.loadImageAsyncStart;
+  globalThis.teavmFile.loadFontAsyncStart ??= fileImports.loadFontAsyncStart;
+  globalThis.teavmFile.errorResult ??= fileImports.errorResult;
+  globalThis.teavmFile.storeOperationBytes ??= fileImports.storeOperationBytes;
+  globalThis.teavmFile.operationBytes ??= fileImports.operationBytes;
+  globalThis.teavmFile.operationByteLength ??= fileImports.operationByteLength;
+  globalThis.teavmFile.operationByteAt ??= fileImports.operationByteAt;
+  globalThis.teavmFile.releaseOperationBytes ??= fileImports.releaseOperationBytes;
+}
+
+function createTeaVmFileImportModule() {
+  return {
+    setActiveRuntime(runtime) {
+      return setActiveRuntime(runtime);
+    },
+    open(pathBytes, modeBytes) {
+      return toFileOperationResult(() => openFilePath(decodeFileBytes(pathBytes), decodeFileBytes(modeBytes) || "read"));
+    },
+    openAsyncStart(requestId, pathBytes, modeBytes) {
+      openFilePath(decodeFileBytes(pathBytes), decodeFileBytes(modeBytes) || "read")
+        .then((bytes) => storeFileOperationBytes(fileOkResult(bytes)), (reason) => storeFileOperationBytes(fileErrorResult(reason)))
+        .then((resultId) => completeFileOpen(requestId, resultId));
+    },
+    write(pathBytes, data) {
+      return toFileOperationStatus(() => {});
+    },
+    writeSync(pathBytes, data) {
+      return storeFileOperationBytes(toFileOperationStatus(() => {}));
+    },
+    close(pathBytes, modeBytes, data) {
+      return toFileOperationStatus(() => {});
+    },
+    closeSync(pathBytes, modeBytes, data) {
+      return storeFileOperationBytes(toFileOperationStatus(() => {}));
+    },
+    loadImageAsyncStart(requestId, pathBytes, data) {
+      loadDecodedImageAsset(decodeFileBytes(pathBytes), data)
+        .then((token) => storeFileOperationBytes(fileOkResult(encodeText(token))), (reason) => storeFileOperationBytes(fileErrorResult(reason)))
+        .then((resultId) => completeAssetLoad(requestId, resultId));
+    },
+    loadFontAsyncStart(requestId, pathBytes, data) {
+      loadFontAsset(decodeFileBytes(pathBytes), data)
+        .then((family) => storeFileOperationBytes(fileOkResult(encodeText(family))), (reason) => storeFileOperationBytes(fileErrorResult(reason)))
+        .then((resultId) => completeAssetLoad(requestId, resultId));
+    },
+    errorResult(error) {
+      return fileErrorResult(error);
+    },
+    storeOperationBytes(value) {
+      return storeFileOperationBytes(value);
+    },
+    operationBytes(value) {
+      return typeof value === "number" ? getStoredFileOperationBytes(value) : normalizeFileOperationBytes(value);
+    },
+    operationByteLength(resultId) {
+      return getStoredFileOperationBytes(resultId).length | 0;
+    },
+    operationByteAt(resultId, index) {
+      return getStoredFileOperationBytes(resultId)[index] | 0;
+    },
+    releaseOperationBytes(resultId) {
+      fileOperationByteStore().delete(resultId | 0);
+    },
+  };
+}
+
+function fileOperationByteStore() {
+  return globalThis.__teavmJavacFileOperationBytes ??= new Map();
+}
+
+function storeFileOperationBytes(value) {
+  const store = fileOperationByteStore();
+  const bytes = normalizeFileOperationBytes(value);
+  let id = globalThis.__teavmJavacFileOperationBytesNextId = (globalThis.__teavmJavacFileOperationBytesNextId ?? 0) + 1;
+  if (id > 0x7fffffff) {
+    id = 1;
+    globalThis.__teavmJavacFileOperationBytesNextId = id;
+  }
+  store.set(id, bytes);
+  return id;
+}
+
+function getStoredFileOperationBytes(resultId) {
+  const bytes = fileOperationByteStore().get(resultId | 0);
+  return bytes ?? fileErrorResult(new Error("File operation result was released"));
+}
+
+function completeFileOpen(requestId, resultId) {
+  const runtime = globalThis.__teavmActiveRuntime;
+  const complete = runtime?.exports?.teavm_file_open_complete
+    ?? runtime?.instance?.exports?.teavm_file_open_complete
+    ?? runtime?.teavm_file_open_complete
+    ?? globalThis.teavm_file_open_complete;
+  if (typeof complete !== "function") {
+    throw new Error("TeaVM file runtime is not installed");
+  }
+  complete(requestId | 0, resultId | 0);
+}
+
+function completeAssetLoad(requestId, resultId) {
+  const runtime = globalThis.__teavmActiveRuntime;
+  const complete = runtime?.exports?.teavm_asset_load_complete
+    ?? runtime?.instance?.exports?.teavm_asset_load_complete
+    ?? runtime?.teavm_asset_load_complete
+    ?? globalThis.teavm_asset_load_complete;
+  if (typeof complete !== "function") {
+    throw new Error("TeaVM asset runtime is not installed");
+  }
+  complete(requestId | 0, resultId | 0);
+}
+
+function normalizeFileOperationBytes(value) {
+  if (value instanceof Int8Array) {
+    return value;
+  }
+  if (value instanceof Uint8Array || ArrayBuffer.isView(value)) {
+    return new Int8Array(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Int8Array(value.slice(0));
+  }
+  return fileErrorResult(new TypeError("File operation did not return bytes"));
+}
+
+function toFileOperationResult(operation) {
+  try {
+    const value = operation();
+    if (isPromiseLike(value)) {
+      return value.then(fileOkResult, fileErrorResult);
+    }
+    return fileOkResult(value);
+  } catch (error) {
+    return fileErrorResult(error);
+  }
+}
+
+function toFileOperationStatus(operation) {
+  return toFileOperationResult(() => {
+    const value = operation();
+    if (isPromiseLike(value)) {
+      throw new TypeError("File write/close callbacks must be synchronous");
+    }
+    return new Uint8Array(0);
+  });
+}
+
+function fileOkResult(value = new Uint8Array(0)) {
+  const bytes = normalizeFileContent(value) ?? new Uint8Array(0);
+  const result = new Int8Array(bytes.length + 1);
+  result[0] = 0;
+  result.set(bytes, 1);
+  return result;
+}
+
+function fileErrorResult(error) {
+  const message = encodeText(safeErrorMessage(error));
+  const result = new Int8Array(message.length + 1);
+  result[0] = 1;
+  result.set(message, 1);
+  return result;
+}
+
+function safeErrorMessage(error) {
+  if (error == null) {
+    return String(error);
+  }
+  try {
+    const message = error.message;
+    if (typeof message === "string") {
+      return message;
+    }
+    if (message != null) {
+      return String(message);
+    }
+  } catch {
+  }
+  try {
+    const name = error.name;
+    if (typeof name === "string") {
+      return name;
+    }
+    if (name != null) {
+      return String(name);
+    }
+  } catch {
+  }
+  try {
+    return Object.prototype.toString.call(error);
+  } catch {
+    return "File operation failed";
+  }
+}
+
+function encodeText(value) {
+  if (typeof TextEncoder === "function") {
+    return new Int8Array(new TextEncoder().encode(String(value)).buffer);
+  }
+  value = String(value);
+  const bytes = new Int8Array(value.length);
+  for (let i = 0; i < value.length; i++) {
+    bytes[i] = value.charCodeAt(i) & 255;
+  }
+  return bytes;
+}
+
+function normalizeFileContent(value) {
+  if (value == null) {
+    return null;
+  }
+  if (typeof value === "string") {
+    return encodeText(value);
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Int8Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    return new Int8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  if (Array.isArray(value)) {
+    return Int8Array.from(value);
+  }
+  throw new TypeError("file content must be string, ArrayBuffer, typed array, array, null, or undefined");
+}
+
+async function openFilePath(path, mode = "read") {
+  mode = normalizeFileMode(mode);
+  const candidates = mode === "read" ? processingOpenReadPaths(path) : [normalizeStorePath(path)];
+  if (mode === "write" || mode === "append") {
+    return new Uint8Array(0);
+  }
+  return openProcessingFileCandidate(candidates, 0, path);
+}
+
+async function openProcessingFileCandidate(candidates, index, originalPath) {
+  if (index < candidates.length) {
+    const candidate = candidates[index];
+    try {
+      return await fetchFilePath(candidate);
+    } catch (error) {
+      if (error?.name !== "FileNotFoundError") {
+        throw error;
+      }
+      return openProcessingFileCandidate(candidates, index + 1, originalPath);
+    }
+  }
+  throw createFileNotFoundError(originalPath);
+}
+
+async function fetchFilePath(path) {
+  if (typeof fetch !== "function") {
+    throw new Error("fetch is not available for file read");
+  }
+  const response = await fetch(path);
+  if (!response.ok) {
+    throw createFileNotFoundError(path);
+  }
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+function normalizeFilePath(path, pathBytes) {
+  if (typeof path === "string") {
+    return path;
+  }
+  if (pathBytes != null) {
+    return decodeFileBytes(pathBytes);
+  }
+  return String(path);
+}
+
+function normalizeFileMode(mode, modeBytes) {
+  if (typeof mode === "string" && mode.length > 0) {
+    return mode;
+  }
+  if (modeBytes != null) {
+    return decodeFileBytes(modeBytes);
+  }
+  return "read";
+}
+
+function decodeFileBytes(value) {
+  const bytes = copyFileWriteData(value);
+  if (typeof TextDecoder === "function") {
+    return new TextDecoder().decode(bytes);
+  }
+  let result = "";
+  for (let i = 0; i < bytes.length; i++) {
+    result += String.fromCharCode(bytes[i]);
+  }
+  return result;
+}
+
+function resolveFileAssetUrl(path, mimeType, data = null) {
+  if (data == null) {
+    throw new Error(`File bytes were not provided for asset: ${path}`);
+  }
+  const bytes = copyFileWriteData(data);
+  const cache = fileAssetUrlCache();
+  const key = `${path}\0${mimeType ?? ""}`;
+  const cached = cache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const url = URL.createObjectURL(new Blob([bytes], { type: mimeType || "application/octet-stream" }));
+  cache.set(key, url);
+  return url;
+}
+
+async function loadDecodedImageAsset(path, data) {
+  const bytes = copyFileWriteData(data);
+  const mimeType = guessMimeType(path);
+  const url = resolveFileAssetUrl(path, mimeType, bytes);
+  const image = new Image();
+  image.src = url;
+  if (typeof image.decode === "function") {
+    await image.decode();
+  } else {
+    await new Promise((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error(`Could not decode image: ${path}`));
+    });
+  }
+  if (!image.naturalWidth || !image.naturalHeight) {
+    throw new Error(`Could not decode image: ${path}`);
+  }
+  const token = nextDecodedImageToken();
+  decodedImageStore().set(token, image);
+  return token;
+}
+
+function nextDecodedImageToken() {
+  const id = globalThis.__teavmJavacImageNextId = (globalThis.__teavmJavacImageNextId ?? 0) + 1;
+  return `teavm-decoded-image:${id}`;
+}
+
+function decodedImageStore() {
+  return globalThis.__teavmJavacDecodedImages ??= new Map();
+}
+
+function decodedImageByToken(token) {
+  return decodedImageStore().get(token) ?? null;
+}
+
+async function loadFontAsset(path, data) {
+  const family = cssFontFamilyFromPath(path);
+  if (data == null) {
+    throw new Error(`File bytes were not provided for font: ${path}`);
+  }
+  if (typeof FontFace !== "function" || !globalThis.document?.fonts) {
+    return family;
+  }
+  const cache = fileFontCache();
+  if (cache.has(path)) {
+    return cache.get(path);
+  }
+  const bytes = copyFileWriteData(data);
+  const source = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  const font = new FontFace(family, source);
+  await font.load();
+  globalThis.document.fonts.add(font);
+  cache.set(path, family);
+  return family;
+}
+
+function cssFontFamilyFromPath(path) {
+  const name = String(path ?? "font")
+    .replace(/\\/g, "/")
+    .replace(/^.*\//, "")
+    .replace(/\.(ttf|otf)$/i, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "_");
+  return name || "font";
+}
+
+function guessMimeType(path) {
+  const lower = String(path ?? "").toLowerCase();
+  if (lower.endsWith(".png")) {
+    return "image/png";
+  }
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) {
+    return "image/jpeg";
+  }
+  if (lower.endsWith(".gif")) {
+    return "image/gif";
+  }
+  if (lower.endsWith(".webp")) {
+    return "image/webp";
+  }
+  if (lower.endsWith(".svg") || lower.endsWith(".svgz")) {
+    return "image/svg+xml";
+  }
+  if (lower.endsWith(".bmp")) {
+    return "image/bmp";
+  }
+  return "application/octet-stream";
+}
+
+function isRuntimeAssetUrl(path) {
+  return typeof path === "string" && /^(?:blob|data|https?|file):/i.test(path);
+}
+
+function fileAssetUrlCache() {
+  return globalThis.__teavmJavacAssetUrls ??= new Map();
+}
+
+function fileFontCache() {
+  return globalThis.__teavmJavacFonts ??= new Map();
+}
+
+function isPromiseLike(value) {
+  return value != null && typeof value.then === "function";
+}
+
+function processingOpenReadPaths(path) {
+  const normalized = normalizeStorePath(path);
+  const paths = [];
+  const shouldTryData = isProcessingDataLookup(normalized);
+  if (shouldTryData) {
+    paths.push(`data/${normalized}`);
+  }
+  paths.push(normalized);
+  return [...new Set(paths)];
+}
+
+function isProcessingDataLookup(path) {
+  return path.length > 0
+    && !path.startsWith("/")
+    && !path.startsWith("data/")
+    && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(path);
+}
+
+function createFileNotFoundError(path) {
+  const error = new Error(`File not found: ${path}`);
+  error.name = "FileNotFoundError";
+  error.path = path;
+  return error;
+}
+
+function normalizeStorePath(path) {
+  return String(path ?? "").replace(/\\/g, "/");
+}
+
+function invalidateFileAssetCaches(path) {
+  const assetUrls = globalThis.__teavmJavacAssetUrls;
+  if (assetUrls) {
+    for (const [key, url] of assetUrls) {
+      if (key.startsWith(`${path}\0`)) {
+        URL.revokeObjectURL(url);
+        assetUrls.delete(key);
+      }
+    }
+  }
+  globalThis.__teavmJavacFonts?.delete(path);
+}
+
+function copyFileWriteData(data) {
+  if (data instanceof Uint8Array) {
+    return new Uint8Array(data);
+  }
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength));
+  }
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data.slice(0));
+  }
+  return Uint8Array.from(data);
 }
 
 export function createCanvas2DBackend(parent, options = {}) {
@@ -1123,11 +1648,19 @@ export function createCanvas2DBackend(parent, options = {}) {
     },
 
     loadImage(path) {
+      const decoded = decodedImageByToken(path);
+      if (decoded) {
+        return decoded;
+      }
+      const source = isRuntimeAssetUrl(path) ? path : resolveFileAssetUrl(path, guessMimeType(path));
+      if (source == null) {
+        return null;
+      }
       const image = new ownerDocument.defaultView.Image();
       if (options.crossOrigin !== false) {
         image.crossOrigin = options.crossOrigin ?? "anonymous";
       }
-      image.src = path;
+      image.src = source;
       return image;
     },
 

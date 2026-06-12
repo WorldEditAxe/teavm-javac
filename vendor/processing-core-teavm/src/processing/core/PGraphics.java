@@ -26,12 +26,14 @@
 package processing.core;
 
 import java.io.File;
+import java.io.InputStream;
 import java.util.Map;
 import java.util.HashMap;
 
 import processing.opengl.PGL;
 import processing.opengl.PShader;
 import processing.platform.core.PlatformRuntimeProvider;
+import processing.platform.teavm.FileAssetBridge;
 
 /**
  *
@@ -4186,8 +4188,19 @@ public class PGraphics extends PImage implements PConstants {
     }
     String lowerName = name.toLowerCase();
     boolean stream = lowerName.endsWith(".otf") || lowerName.endsWith(".ttf");
-    if (stream && parent.createInput(name) == null) {
-      System.err.println("The font \"" + name + "\" is missing or inaccessible.");
+    if (stream) {
+      try (InputStream input = parent.createInput(name)) {
+        if (input == null) {
+          System.err.println("The font \"" + name + "\" is missing or inaccessible.");
+        } else {
+          String family = FileAssetBridge.loadFont(name, PApplet.loadBytes(input));
+          if (family != null && family.length() > 0) {
+            name = family;
+          }
+        }
+      } catch (Exception e) {
+        System.err.println("The font \"" + name + "\" is missing or inaccessible.");
+      }
     }
     return new PFont(name, size * parent.pixelDensity, smooth, charset,
                      stream, parent.pixelDensity);

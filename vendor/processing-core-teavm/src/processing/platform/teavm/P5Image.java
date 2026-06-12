@@ -51,8 +51,16 @@ public class P5Image extends PImage {
     if (nativeHeight < 0) {
       nativeHeight = 0;
     }
-    if (width != nativeWidth || height != nativeHeight || pixels == null) {
-      init(nativeWidth, nativeHeight, PConstants.ARGB, 1);
+    if (width != nativeWidth || height != nativeHeight) {
+      width = nativeWidth;
+      height = nativeHeight;
+      pixelDensity = 1;
+      pixelWidth = nativeWidth;
+      pixelHeight = nativeHeight;
+      format = PConstants.ARGB;
+      if (pixels != null && pixels.length != pixelWidth * pixelHeight) {
+        pixels = null;
+      }
     }
   }
 
@@ -60,6 +68,7 @@ public class P5Image extends PImage {
   @Override
   public void loadPixels() {
     syncSize();
+    pixels = new int[pixelWidth * pixelHeight];
     if (pixelWidth == 0 || pixelHeight == 0) {
       setLoaded();
       return;
@@ -102,6 +111,49 @@ public class P5Image extends PImage {
 
 
   @Override
+  public int get(int x, int y) {
+    loadPixels();
+    return super.get(x, y);
+  }
+
+
+  @Override
+  public PImage get(int x, int y, int width, int height) {
+    loadPixels();
+    return super.get(x, y, width, height);
+  }
+
+
+  @Override
+  public PImage get() {
+    loadPixels();
+    return super.get();
+  }
+
+
+  @Override
+  public PImage copy() {
+    loadPixels();
+    return super.copy();
+  }
+
+
+  @Override
+  public void set(int x, int y, int value) {
+    loadPixels();
+    super.set(x, y, value);
+  }
+
+
+  @Override
+  public void set(int x, int y, PImage image) {
+    loadPixels();
+    image.loadPixels();
+    super.set(x, y, image);
+  }
+
+
+  @Override
   public void resize(int width, int height, int interpolationMode) {
     resize(width, height);
   }
@@ -120,8 +172,9 @@ public class P5Image extends PImage {
     } else if (height == 0) {
       height = Math.max(1, Math.round(this.height * (width / (float) this.width)));
     }
-    P5Bridge.imageResize(nativeImage, width, height);
+    nativeImage = P5Bridge.imageResize(nativeImage, width, height);
     syncSize();
+    pixels = null;
     setLoaded(false);
   }
 

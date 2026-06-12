@@ -283,6 +283,13 @@ public class PGraphicsP5 extends PGraphics {
   protected void imageImpl(PImage image,
                            float x1, float y1, float x2, float y2,
                            int u1, int v1, int u2, int v2) {
+    if (image instanceof P5Image) {
+      ((P5Image) image).syncSize();
+      if (u1 == 0 && v1 == 0 && u2 == 0 && v2 == 0) {
+        u2 = image.width;
+        v2 = image.height;
+      }
+    }
     Object nativeImage = P5PlatformRuntime.current().getNativeImage(image);
     if (nativeImage instanceof JSObject) {
       P5Bridge.image(p5(), (JSObject) nativeImage, x1, y1, x2 - x1, y2 - y1,

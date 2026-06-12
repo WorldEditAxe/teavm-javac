@@ -55,8 +55,14 @@ sourceSets {
         }
     }
     classlibEmu {
+        java {
+            srcDir "src/sharedClasslibEmu/java"
+        }
     }
     runtimeClasslibEmu {
+        java {
+            srcDir "src/sharedClasslibEmu/java"
+        }
         compileClasspath += configurations.classlibInput + configurations.classlibAuxInput
     }
 }
@@ -87,6 +93,10 @@ teavm {
         outOfProcess = true
         processMemory = 4096
         modularRuntime = true
+    }
+    js {
+        outOfProcess = true
+        processMemory = 16384
     }
 }
 
@@ -173,8 +183,17 @@ def prepareTeaVMClassLib = tasks.register("prepareTeaVMClassLib", Copy) {
         }
     }
     from(sourceSets.runtimeClasslibEmu.output) {
+        include "org/teavm/classlib/java/io/TFileInputStream.class"
+        include "org/teavm/classlib/java/io/TFileOutputStream.class"
+        include "org/teavm/classlib/java/io/TFileSystemBridge.class"
+        include "org/teavm/classlib/java/io/TFileDescriptor.class"
+        include "org/teavm/classlib/java/io/TSyncFailedException.class"
         include "org/teavm/classlib/java/nio/TByteBuffer.class"
         include "org/teavm/classlib/java/nio/TCharBuffer.class"
+        include "org/teavm/classlib/java/util/TInputMismatchException.class"
+        include "org/teavm/classlib/java/util/TScanner*.class"
+        include "org/teavm/runtime/EventQueue*.class"
+        include "org/teavm/runtime/TeaVMJavacMain.class"
     }
     into project.layout.buildDirectory.dir("tmp/classlib-runtime")
 }
@@ -198,10 +217,39 @@ def buildTeaVMClassLib = tasks.register("buildTeaVMClassLib", JavaExec) {
 def wasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc")
 def optimizedWasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc-optimized")
 
+def patchWasmGCRuntime = tasks.register("patchWasmGCRuntime") {
+    dependsOn generateWasmGC, copyWasmGCRuntime
+    def runtimeFile = wasmGcOutputDir.map { it.file("compiler.wasm-runtime.js") }
+    inputs.file runtimeFile
+    outputs.file runtimeFile
+
+    doLast {
+        def file = runtimeFile.get().asFile
+        def text = file.getText("UTF-8")
+        if (!text.contains("globalThis.__teavmInstallFileImports")) {
+            def needle = "if(typeof t.installImports!==\"undefined\"){t.installImports(f)}"
+            def replacement = needle + "if(typeof globalThis!==\"undefined\"&&typeof globalThis.__teavmInstallFileImports===\"function\"){globalThis.__teavmInstallFileImports(f)}"
+            if (!text.contains(needle)) {
+                throw new GradleException("Could not patch TeaVM Wasm-GC runtime import installer")
+            }
+            file.setText(text.replace(needle, replacement), "UTF-8")
+            text = file.getText("UTF-8")
+        }
+        if (!text.contains("globalThis.__teavmActiveRuntime=w")) {
+            def needle = "const w={exports:p,instance:b,module:c};"
+            def replacement = needle + "if(typeof globalThis!==\"undefined\"){globalThis.__teavmActiveRuntime=w}"
+            if (!text.contains(needle)) {
+                throw new GradleException("Could not patch TeaVM Wasm-GC active runtime installer")
+            }
+            file.setText(text.replace(needle, replacement), "UTF-8")
+        }
+    }
+}
+
 def optimizeWasmGC = tasks.register("optimizeWasmGC") {
     group "build"
     description "Runs wasm-opt -O4 over generated TeaVM Wasm-GC compiler binaries."
-    dependsOn generateWasmGC, copyWasmGCRuntime
+    dependsOn generateWasmGC, patchWasmGCRuntime
     inputs.files(provider {
         fileTree(wasmGcOutputDir.get().asFile) {
             include "*.wasm"
@@ -214,13 +262,14 @@ def optimizeWasmGC = tasks.register("optimizeWasmGC") {
         def outputDir = optimizedWasmGcOutputDir.get().asFile
         delete outputDir
         outputDir.mkdirs()
+        def wasmOpt = System.getenv("WASM_OPT") ?: "wasm-opt"
 
         fileTree(inputDir) {
             include "*.wasm"
         }.files.each { inputFile ->
             def outputFile = new File(outputDir, inputFile.name)
             def command = [
-                    "wasm-opt",
+                    wasmOpt,
                         "-O4",
                         "--skip-pass=flatten",
                         "--enable-gc",
@@ -254,7 +303,7 @@ build {
 
 def createDist = tasks.register("createDist", Zip) {
     group "build"
-    dependsOn generateJavaScript, optimizeWasmGC
+    dependsOn generateJavaScript, optimizeWasmGC, patchWasmGCRuntime
     from buildTeaVMClassLib
     from generateClassLib
     from "src/main/js"

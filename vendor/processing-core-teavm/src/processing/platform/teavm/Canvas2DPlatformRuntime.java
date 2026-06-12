@@ -24,6 +24,7 @@ package processing.platform.teavm;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -227,13 +228,31 @@ public class Canvas2DPlatformRuntime implements PlatformRuntime {
 
   @Override
   public PImage loadImage(PApplet sketch, String path, Object... args) {
-    JSObject nativeImage = Canvas2DBridge.loadImage(host(), path);
+    String imagePath = loadImagePath(sketch, path);
+    if (imagePath == null) {
+      return null;
+    }
+    JSObject nativeImage = Canvas2DBridge.loadImage(host(), imagePath);
     if (nativeImage == null) {
       return null;
     }
     Canvas2DImage image = new Canvas2DImage(nativeImage);
     image.parent = sketch;
     return image;
+  }
+
+
+  private String loadImagePath(PApplet sketch, String path) {
+    try (InputStream input = sketch.createInput(path)) {
+      if (input == null) {
+        System.err.println("The image " + path + " could not be found.");
+        return null;
+      }
+      return FileAssetBridge.loadImage(path, PApplet.loadBytes(input));
+    } catch (IOException e) {
+      e.printStackTrace();
+      return null;
+    }
   }
 
 

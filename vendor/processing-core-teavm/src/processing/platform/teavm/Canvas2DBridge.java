@@ -25,6 +25,8 @@ package processing.platform.teavm;
 import org.teavm.jso.JSBody;
 import org.teavm.jso.JSFunctor;
 import org.teavm.jso.JSObject;
+import org.teavm.interop.Async;
+import org.teavm.interop.AsyncCallback;
 
 final class Canvas2DBridge {
   private Canvas2DBridge() { }
@@ -194,6 +196,17 @@ final class Canvas2DBridge {
   static native double requestAnimationFrame(AnimationFrameCallback callback);
 
 
+  @Async
+  static native double nextAnimationFrame();
+
+
+  private static void nextAnimationFrame(AsyncCallback<Double> callback) {
+    requestAnimationFrame(time -> {
+      callback.complete(time);
+    });
+  }
+
+
   @JSBody(params = { "id" }, script =
     "if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(id);")
   static native void cancelAnimationFrame(double id);
@@ -237,6 +250,8 @@ final class Canvas2DBridge {
 
 
   @JSBody(params = { "host", "path" }, script =
+    "var decoded = globalThis.__teavmJavacDecodedImages && globalThis.__teavmJavacDecodedImages.get(path);" +
+    "if (decoded) return decoded;" +
     "if (!host || typeof host.loadImage !== 'function') return null;" +
     "return host.loadImage(path);")
   static native JSObject loadImage(JSObject host, String path);
@@ -255,12 +270,12 @@ final class Canvas2DBridge {
 
 
   @JSBody(params = { "image" }, script =
-    "return image && image.width ? image.width : 0;")
+    "return image ? (image.naturalWidth || image.width || 0) : 0;")
   static native int imageWidth(JSObject image);
 
 
   @JSBody(params = { "image" }, script =
-    "return image && image.height ? image.height : 0;")
+    "return image ? (image.naturalHeight || image.height || 0) : 0;")
   static native int imageHeight(JSObject image);
 
 
@@ -275,8 +290,44 @@ final class Canvas2DBridge {
 
 
   @JSBody(params = { "image", "width", "height" }, script =
-    "if (image && typeof image.resize === 'function') image.resize(width, height);")
-  static native void imageResize(JSObject image, int width, int height);
+    "if (!image) return image;" +
+    "if (typeof image.resize === 'function') { image.resize(width, height); return image; }" +
+    "var source = image.canvas || image.elt || image;" +
+    "var doc = source.ownerDocument || (typeof document !== 'undefined' ? document : null);" +
+    "if (!doc) return image;" +
+    "var canvas = doc.createElement('canvas');" +
+    "var resized = {" +
+    "  canvas: canvas, elt: canvas," +
+    "  width: Math.max(1, Math.round(Number(width) || 1))," +
+    "  height: Math.max(1, Math.round(Number(height) || 1))," +
+    "  pixels: null, imageData: null," +
+    "  loadPixels: function() {" +
+    "    var context = canvas.getContext('2d');" +
+    "    this.imageData = context.getImageData(0, 0, canvas.width, canvas.height);" +
+    "    this.pixels = this.imageData.data;" +
+    "  }," +
+    "  updatePixels: function() {" +
+    "    if (this.imageData) canvas.getContext('2d').putImageData(this.imageData, 0, 0);" +
+    "  }," +
+    "  resize: function(nextWidth, nextHeight) {" +
+    "    var oldCanvas = doc.createElement('canvas');" +
+    "    oldCanvas.width = canvas.width;" +
+    "    oldCanvas.height = canvas.height;" +
+    "    oldCanvas.getContext('2d').drawImage(canvas, 0, 0);" +
+    "    this.width = Math.max(1, Math.round(Number(nextWidth) || this.width));" +
+    "    this.height = Math.max(1, Math.round(Number(nextHeight) || this.height));" +
+    "    canvas.width = this.width;" +
+    "    canvas.height = this.height;" +
+    "    canvas.getContext('2d').drawImage(oldCanvas, 0, 0, this.width, this.height);" +
+    "    this.imageData = null;" +
+    "    this.pixels = null;" +
+    "  }" +
+    "};" +
+    "canvas.width = resized.width;" +
+    "canvas.height = resized.height;" +
+    "canvas.getContext('2d').drawImage(source, 0, 0, resized.width, resized.height);" +
+    "return resized;")
+  static native JSObject imageResize(JSObject image, int width, int height);
 
 
   @JSBody(params = { "image" }, script =

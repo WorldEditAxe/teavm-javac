@@ -36,10 +36,8 @@ import processing.event.MouseEvent;
 
 public class Canvas2DSurface extends PSurfaceNone {
   private JSObject renderer;
-  private Canvas2DBridge.AnimationFrameCallback frameCallback;
   private Canvas2DBridge.MouseInputCallback mouseInputCallback;
   private Canvas2DBridge.KeyInputCallback keyInputCallback;
-  private double frameRequest = -1;
   private double lastFrameMillis = -1;
   private boolean running;
 
@@ -187,9 +185,8 @@ public class Canvas2DSurface extends PSurfaceNone {
     }
 
     running = true;
-    frameCallback = this::onAnimationFrame;
     sketch.start();
-    frameRequest = Canvas2DBridge.requestAnimationFrame(frameCallback);
+    new Thread(this::runFrameLoop, "Processing Animation").start();
   }
 
 
@@ -199,10 +196,6 @@ public class Canvas2DSurface extends PSurfaceNone {
       return false;
     }
     running = false;
-    if (frameRequest >= 0) {
-      Canvas2DBridge.cancelAnimationFrame(frameRequest);
-      frameRequest = -1;
-    }
     return true;
   }
 
@@ -225,9 +218,18 @@ public class Canvas2DSurface extends PSurfaceNone {
   }
 
 
-  private void onAnimationFrame(double timeMillis) {
+  private void runFrameLoop() {
+    while (running) {
+      if (!onAnimationFrame(Canvas2DBridge.nextAnimationFrame())) {
+        break;
+      }
+    }
+  }
+
+
+  private boolean onAnimationFrame(double timeMillis) {
     if (!running) {
-      return;
+      return false;
     }
 
     if (sketch.finished) {
@@ -235,14 +237,14 @@ public class Canvas2DSurface extends PSurfaceNone {
       if (sketch.exitCalled()) {
         sketch.exitActual();
       }
-      return;
+      return false;
     }
 
     if (!paused && shouldDraw(timeMillis)) {
       sketch.handleDraw();
       lastFrameMillis = timeMillis;
     }
-    frameRequest = Canvas2DBridge.requestAnimationFrame(frameCallback);
+    return true;
   }
 
 
