@@ -33,9 +33,7 @@ import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CoderResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
-import java.text.NumberFormat;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.NoSuchElementException;
@@ -197,7 +195,7 @@ public final class TScanner implements Iterator<String>, Closeable {
         requireOpen();
         Token token = peekToken();
         if (token == null) {
-            throw new NoSuchElementException();
+            throw noSuchToken();
         }
         position = token.end;
         lastMatch = new SimpleMatchResult(token.start, token.end, token.text);
@@ -237,11 +235,11 @@ public final class TScanner implements Iterator<String>, Closeable {
         Objects.requireNonNull(pattern);
         Token token = peekToken();
         if (token == null) {
-            throw new NoSuchElementException();
+            throw noSuchToken();
         }
         Matcher matcher = pattern.matcher(token.text);
         if (!matcher.matches()) {
-            throw new TInputMismatchException();
+            throw inputMismatch(token.text);
         }
         position = token.end;
         lastMatch = new OffsetMatchResult(matcher.toMatchResult(), token.start);
@@ -258,7 +256,7 @@ public final class TScanner implements Iterator<String>, Closeable {
         requireOpen();
         ensureLoaded();
         if (position >= input.length()) {
-            throw new NoSuchElementException();
+            throw new NoSuchElementException("No line found");
         }
         Line line = findLine(position);
         String result = input.substring(position, line.end);
@@ -301,7 +299,7 @@ public final class TScanner implements Iterator<String>, Closeable {
         Matcher matcher = pattern.matcher(input);
         matcher.region(position, input.length());
         if (!matcher.lookingAt()) {
-            throw new NoSuchElementException();
+            throw new NoSuchElementException("Pattern not found");
         }
         position = matcher.end();
         lastMatch = matcher.toMatchResult();
@@ -471,7 +469,7 @@ public final class TScanner implements Iterator<String>, Closeable {
             @Override
             public MatchResult next() {
                 if (!hasNext()) {
-                    throw new NoSuchElementException();
+                    throw noSuchToken();
                 }
                 MatchResult result = next;
                 next = null;
@@ -620,7 +618,7 @@ public final class TScanner implements Iterator<String>, Closeable {
         requireOpen();
         Token token = peekToken();
         if (token == null) {
-            throw new NoSuchElementException();
+            throw noSuchToken();
         }
         try {
             T result = parser.parse(token.text);
@@ -628,7 +626,7 @@ public final class TScanner implements Iterator<String>, Closeable {
             lastMatch = new SimpleMatchResult(token.start, token.end, token.text);
             return result;
         } catch (RuntimeException e) {
-            throw new TInputMismatchException();
+            throw inputMismatch(token.text);
         }
     }
 
@@ -636,11 +634,11 @@ public final class TScanner implements Iterator<String>, Closeable {
         requireOpen();
         Token token = peekToken();
         if (token == null) {
-            throw new NoSuchElementException();
+            throw noSuchToken();
         }
         Matcher matcher = pattern.matcher(token.text);
         if (!matcher.matches()) {
-            throw new TInputMismatchException();
+            throw inputMismatch(token.text);
         }
         T result = parser.parse(token.text);
         position = token.end;
@@ -651,6 +649,14 @@ public final class TScanner implements Iterator<String>, Closeable {
     private <T> T nextParsed(int radix, Parser<T> parser) {
         checkRadix(radix);
         return nextParsed(parser);
+    }
+
+    private NoSuchElementException noSuchToken() {
+        return new NoSuchElementException("No token available");
+    }
+
+    private TInputMismatchException inputMismatch(String token) {
+        return new TInputMismatchException("Token does not match expected type: " + token);
     }
 
     private String normalizeInteger(String token, int radix) {
@@ -697,24 +703,15 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     private String normalizeSignAndSeparators(String token, boolean decimal) {
-        DecimalFormat format = decimalFormat();
-        DecimalFormatSymbols symbols = format.getDecimalFormatSymbols();
+        DecimalFormatSymbols symbols = decimalSymbols();
         String value = token;
         boolean negative = false;
 
-        String negativePrefix = format.getNegativePrefix();
-        String negativeSuffix = format.getNegativeSuffix();
-        if (!negativePrefix.isEmpty() && value.startsWith(negativePrefix)
-                && (negativeSuffix.isEmpty() || value.endsWith(negativeSuffix))) {
-            value = value.substring(negativePrefix.length(), value.length() - negativeSuffix.length());
+        if (value.startsWith("-")) {
+            value = value.substring(1);
             negative = true;
-        } else {
-            String positivePrefix = format.getPositivePrefix();
-            String positiveSuffix = format.getPositiveSuffix();
-            if (!positivePrefix.isEmpty() && value.startsWith(positivePrefix)
-                    && (positiveSuffix.isEmpty() || value.endsWith(positiveSuffix))) {
-                value = value.substring(positivePrefix.length(), value.length() - positiveSuffix.length());
-            }
+        } else if (value.startsWith("+")) {
+            value = value.substring(1);
         }
 
         char group = symbols.getGroupingSeparator();
@@ -733,16 +730,8 @@ public final class TScanner implements Iterator<String>, Closeable {
         return sb.toString();
     }
 
-    private DecimalFormat decimalFormat() {
-        NumberFormat format = NumberFormat.getNumberInstance(locale);
-        if (format instanceof DecimalFormat) {
-            return (DecimalFormat) format;
-        }
-        return (DecimalFormat) NumberFormat.getNumberInstance(Locale.ROOT);
-    }
-
     private DecimalFormatSymbols decimalSymbols() {
-        return decimalFormat().getDecimalFormatSymbols();
+        return new DecimalFormatSymbols(locale);
     }
 
     private void checkRadix(int radix) {

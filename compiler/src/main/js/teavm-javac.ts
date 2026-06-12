@@ -30,6 +30,22 @@ let compilerWasmGCSupportPromise = null;
 export type BinaryInput = string | URL | ArrayBuffer | ArrayBufferView | Int8Array;
 export type TeaVMOptimizationLevel = "simple" | "advanced" | "full" | "SIMPLE" | "ADVANCED" | "FULL";
 export type CompilerBackend = "auto" | "js" | "javascript" | "wasm" | "wasm-gc" | "wasmgc";
+export type JavaRuntimeStdin =
+  | string
+  | ArrayBuffer
+  | ArrayBufferView
+  | (() => number | null | undefined)
+  | { readStdin(): number | null | undefined }
+  | { read(): number | null | undefined };
+export type JavaRuntimeOutput = ((text: string) => void) | { write(text: string): void };
+
+export interface JavaRuntimeIOOptions {
+  stdin?: JavaRuntimeStdin;
+  stdout?: JavaRuntimeOutput;
+  stderr?: JavaRuntimeOutput;
+  installImports?: (imports: Record<string, unknown>, controller?: unknown) => void;
+  [name: string]: unknown;
+}
 
 export interface CompilerClasslibOptions {
   javac?: BinaryInput;
@@ -66,6 +82,9 @@ export interface CompilerRuntimeLoadOptions {
   wasmRuntimeUrl?: string | URL;
   wasmRuntimeOptions?: Record<string, unknown>;
   runtimeOptions?: Record<string, unknown>;
+  stdin?: JavaRuntimeStdin;
+  stdout?: JavaRuntimeOutput;
+  stderr?: JavaRuntimeOutput;
   fallbackToJs?: boolean;
 }
 
@@ -232,6 +251,19 @@ export async function loadCompilerRuntime(
 }
 
 export const loadRuntime: typeof loadCompilerRuntime = loadCompilerRuntime;
+
+export function createJavaRuntimeOptions(options: JavaRuntimeIOOptions = {}): JavaRuntimeIOOptions {
+  const { installImports, stdin, stdout, stderr, ...rest } = options;
+  return {
+    ...rest,
+    installImports(imports, controller) {
+      if (typeof installImports === "function") {
+        installImports(imports, controller);
+      }
+      installJavaRuntimeIO(imports, { stdin, stdout, stderr });
+    },
+  };
+}
 
 export async function supportsCompilerWasmGC(): Promise<boolean> {
   return (await getCompilerWasmGCSupport()).supported;
@@ -643,14 +675,29 @@ function normalizeCompilerRuntimeRequest(input) {
       ?? DEFAULT_COMPILER_BACKEND
   );
 
+  const wasmRuntimeOptions = normalizeJavaRuntimeOptions(input);
+
   return {
     backend,
     compilerJs,
     compilerWasm,
     compilerWasmRuntime,
-    wasmRuntimeOptions: input.wasmRuntimeOptions ?? input.runtimeOptions ?? {},
+    wasmRuntimeOptions,
     fallbackToJs: input.fallbackToJs !== false,
   };
+}
+
+function normalizeJavaRuntimeOptions(input) {
+  const runtimeOptions = input.wasmRuntimeOptions ?? input.runtimeOptions ?? {};
+  if (input.stdin == null && input.stdout == null && input.stderr == null) {
+    return runtimeOptions;
+  }
+  return createJavaRuntimeOptions({
+    ...runtimeOptions,
+    stdin: input.stdin,
+    stdout: input.stdout,
+    stderr: input.stderr,
+  });
 }
 
 function normalizeCompilerBackend(value) {
@@ -728,6 +775,62 @@ function createWasmFallbackDiagnostic(reason) {
     severity: "warning",
     fileName: null,
     message: `TeaVM Wasm-GC compiler backend is not available (${reason}); falling back to the JavaScript compiler backend. Use a supporting browser such as modern Chrome for the Wasm-GC compiler runtime.`,
+  };
+}
+
+function installJavaRuntimeIO(imports, options) {
+  const consoleImports = imports.teavmConsole ?? {};
+  imports.teavmConsole = consoleImports;
+  consoleImports.readStdin = createStdinReader(options.stdin);
+  if (options.stdout != null) {
+    consoleImports.putcharStdout = createRuntimeOutput(options.stdout);
+  }
+  if (options.stderr != null) {
+    consoleImports.putcharStderr = createRuntimeOutput(options.stderr);
+  }
+}
+
+function createStdinReader(stdin) {
+  if (stdin == null) {
+    return () => -1;
+  }
+  if (typeof stdin === "string") {
+    return createByteReader(new TextEncoder().encode(stdin));
+  }
+  if (stdin instanceof ArrayBuffer) {
+    return createByteReader(new Uint8Array(stdin));
+  }
+  if (ArrayBuffer.isView(stdin)) {
+    return createByteReader(new Uint8Array(stdin.buffer, stdin.byteOffset, stdin.byteLength));
+  }
+  if (typeof stdin === "function") {
+    return () => normalizeStdinByte(stdin());
+  }
+  if (typeof stdin.readStdin === "function") {
+    return () => normalizeStdinByte(stdin.readStdin());
+  }
+  if (typeof stdin.read === "function") {
+    return () => normalizeStdinByte(stdin.read());
+  }
+  throw new TypeError("stdin must be a string, binary buffer, function, or object with readStdin()/read()");
+}
+
+function createByteReader(bytes) {
+  let index = 0;
+  return () => index < bytes.length ? bytes[index++] : -1;
+}
+
+function normalizeStdinByte(value) {
+  if (value == null || value < 0) {
+    return -1;
+  }
+  return value & 0xFF;
+}
+
+function createRuntimeOutput(output) {
+  const write = typeof output === "function" ? output : output.write.bind(output);
+  return (charCode) => {
+    write(String.fromCharCode(charCode & 0xFFFF));
   };
 }
 

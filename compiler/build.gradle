@@ -177,6 +177,7 @@ def prepareTeaVMClassLib = tasks.register("prepareTeaVMClassLib", Copy) {
     from(sourceSets.runtimeClasslibEmu.output) {
         include "org/teavm/classlib/java/nio/TByteBuffer.class"
         include "org/teavm/classlib/java/nio/TCharBuffer.class"
+        include "org/teavm/classlib/java/lang/TConsoleInputStream.class"
         include "org/teavm/classlib/java/util/TInputMismatchException.class"
         include "org/teavm/classlib/java/util/TScanner*.class"
     }
@@ -226,10 +227,38 @@ def compileNpmWrapper = tasks.register("compileNpmWrapper", Exec) {
 def wasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc")
 def optimizedWasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc-optimized")
 
+def patchWasmGCRuntime = tasks.register("patchWasmGCRuntime") {
+    group "build"
+    description "Adds default stdin EOF support to generated TeaVM Wasm-GC runtime loaders."
+    dependsOn generateWasmGC, copyWasmGCRuntime
+    def runtimeFiles = provider {
+        fileTree(wasmGcOutputDir.get().asFile) {
+            include "*.wasm-runtime.js"
+        }
+    }
+    inputs.files(runtimeFiles)
+    outputs.files(runtimeFiles)
+
+    doLast {
+        fileTree(wasmGcOutputDir.get().asFile) {
+            include "*.wasm-runtime.js"
+        }.files.each { runtimeFile ->
+            def text = runtimeFile.getText("UTF-8")
+            if (!text.contains("readStdin(){return -1}")) {
+                def patched = text.replace("e.teavmConsole={putcharStderr", "e.teavmConsole={readStdin(){return -1},putcharStderr")
+                if (patched == text) {
+                    throw new GradleException("Could not patch stdin default into ${runtimeFile.name}")
+                }
+                runtimeFile.setText(patched, "UTF-8")
+            }
+        }
+    }
+}
+
 def optimizeWasmGC = tasks.register("optimizeWasmGC") {
     group "build"
     description "Runs wasm-opt -O4 over generated TeaVM Wasm-GC compiler binaries."
-    dependsOn generateWasmGC, copyWasmGCRuntime
+    dependsOn generateWasmGC, patchWasmGCRuntime
     inputs.files(provider {
         fileTree(wasmGcOutputDir.get().asFile) {
             include "*.wasm"
