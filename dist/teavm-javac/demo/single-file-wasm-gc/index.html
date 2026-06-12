@@ -1,0 +1,686 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Single File Processing Wasm-GC Demo</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #111318;
+        --panel: #191d24;
+        --panel-strong: #202632;
+        --ink: #f2f5f8;
+        --muted: #aeb8c5;
+        --line: #333b49;
+        --accent: #65d1bf;
+        --accent-2: #f1b85f;
+        --danger: #ff7474;
+        --ok: #7bd88f;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 250px),
+          var(--bg);
+        color: var(--ink);
+      }
+
+      main {
+        width: min(1480px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 22px 0 28px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 0 0 18px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 0;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        min-height: 34px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--muted);
+        border-radius: 6px;
+        white-space: nowrap;
+      }
+
+      .dot {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: var(--accent-2);
+      }
+
+      .status[data-state="running"] .dot {
+        background: var(--ok);
+      }
+
+      .status[data-state="error"] .dot {
+        background: var(--danger);
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(360px, 0.92fr) minmax(420px, 1.08fr);
+        gap: 18px;
+        align-items: stretch;
+      }
+
+      .column {
+        min-width: 0;
+      }
+
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      label {
+        color: var(--muted);
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      input,
+      textarea,
+      button {
+        font: inherit;
+      }
+
+      input[type="text"] {
+        width: 178px;
+        height: 36px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+        color: var(--ink);
+        padding: 0 10px;
+      }
+
+      input[type="file"] {
+        max-width: 260px;
+        color: var(--muted);
+      }
+
+      button {
+        height: 36px;
+        border: 1px solid color-mix(in srgb, var(--accent) 70%, white 0%);
+        border-radius: 6px;
+        background: var(--accent);
+        color: #06221d;
+        font-weight: 800;
+        padding: 0 14px;
+        cursor: pointer;
+      }
+
+      button:disabled {
+        cursor: wait;
+        opacity: 0.62;
+      }
+
+      textarea {
+        display: block;
+        width: 100%;
+        min-height: 650px;
+        resize: vertical;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #0c0f14;
+        color: #edf4f7;
+        padding: 14px;
+        line-height: 1.45;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        font-size: 13px;
+        tab-size: 2;
+      }
+
+      .stage {
+        min-height: 650px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #06080b;
+        overflow: hidden;
+      }
+
+      processing {
+        display: block;
+        width: 100%;
+        min-height: 650px;
+      }
+
+      processing canvas {
+        display: block;
+        width: 100% !important;
+        height: auto !important;
+        outline: none;
+      }
+
+      .stats {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .stat {
+        min-height: 58px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel);
+        padding: 9px 10px;
+      }
+
+      .stat span {
+        display: block;
+      }
+
+      .stat span:first-child {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .stat span:last-child {
+        margin-top: 5px;
+        color: var(--ink);
+        font-size: 15px;
+        font-weight: 700;
+        overflow-wrap: anywhere;
+      }
+
+      .diagnostics {
+        margin: 12px 0 0;
+        min-height: 110px;
+        max-height: 210px;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-strong);
+        color: var(--muted);
+        padding: 12px;
+        white-space: pre-wrap;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      @media (max-width: 1040px) {
+        main {
+          width: min(100vw - 20px, 760px);
+        }
+
+        .topbar,
+        .workspace {
+          display: block;
+        }
+
+        .status {
+          margin-top: 12px;
+        }
+
+        .stage {
+          margin-top: 16px;
+        }
+
+        .stats {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="topbar">
+        <h1>Single File Processing to Wasm-GC</h1>
+        <div id="status" class="status" data-state="idle">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="statusText">Ready</span>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <section class="column" aria-label="Single file Processing source">
+          <div class="toolbar">
+            <label for="sketchName">Sketch class</label>
+            <input id="sketchName" type="text" value="SingleFileWasmDemo" spellcheck="false">
+            <input id="filePicker" type="file" accept=".pde,text/plain">
+            <button id="runButton" type="button">Run FULL Wasm-GC</button>
+          </div>
+          <textarea id="source" spellcheck="false">final int COUNT = 280;
+
+float[] x = new float[COUNT];
+float[] y = new float[COUNT];
+float[] vx = new float[COUNT];
+float[] vy = new float[COUNT];
+float[] spin = new float[COUNT];
+float pulse;
+boolean trails = true;
+int paletteShift = 0;
+
+void setup() {
+  size(920, 620);
+  smooth(4);
+  colorMode(HSB, 360, 100, 100, 100);
+  textAlign(CENTER, CENTER);
+  textSize(16);
+
+  for (int i = 0; i < COUNT; i++) {
+    x[i] = random(width);
+    y[i] = random(height);
+    float a = random(TWO_PI);
+    float s = random(0.35, 2.3);
+    vx[i] = cos(a) * s;
+    vy[i] = sin(a) * s;
+    spin[i] = random(TWO_PI);
+  }
+}
+
+void draw() {
+  if (trails) {
+    noStroke();
+    fill(222, 30, 5, 12);
+    rect(0, 0, width, height);
+  } else {
+    background(222, 30, 5);
+  }
+
+  pulse += 0.018;
+  drawField();
+  drawParticles();
+  drawHud();
+}
+
+void drawField() {
+  float targetX = mousePressed ? mouseX : width * 0.5 + cos(pulse * 0.75) * width * 0.22;
+  float targetY = mousePressed ? mouseY : height * 0.5 + sin(pulse * 0.66) * height * 0.22;
+
+  strokeWeight(1);
+  for (int gx = 0; gx <= width; gx += 34) {
+    for (int gy = 0; gy <= height; gy += 34) {
+      float a = atan2(targetY - gy, targetX - gx) + sin(pulse + gx * 0.012) * 0.8;
+      float len = 7 + 13 * abs(sin(pulse + gy * 0.024));
+      stroke((190 + paletteShift + gx * 0.08 + gy * 0.05) % 360, 42, 82, 18);
+      line(gx - cos(a) * len, gy - sin(a) * len, gx + cos(a) * len, gy + sin(a) * len);
+    }
+  }
+
+  noFill();
+  strokeWeight(2);
+  for (int r = 80; r < 430; r += 62) {
+    stroke((160 + paletteShift + r * 0.4 + frameCount * 0.35) % 360, 55, 85, 24);
+    ellipse(targetX, targetY, r + sin(pulse + r) * 22, r * 0.58 + cos(pulse * 1.2 + r) * 15);
+  }
+}
+
+void drawParticles() {
+  float targetX = mousePressed ? mouseX : width * 0.5;
+  float targetY = mousePressed ? mouseY : height * 0.5;
+
+  for (int i = 0; i < COUNT; i++) {
+    float dx = targetX - x[i];
+    float dy = targetY - y[i];
+    float d = max(24, sqrt(dx * dx + dy * dy));
+    float pull = mousePressed ? 0.065 : 0.018;
+    vx[i] += dx / d * pull;
+    vy[i] += dy / d * pull;
+    vx[i] += sin(pulse * 1.8 + i * 0.37) * 0.018;
+    vy[i] += cos(pulse * 1.4 + i * 0.29) * 0.018;
+    vx[i] *= 0.985;
+    vy[i] *= 0.985;
+    x[i] += vx[i];
+    y[i] += vy[i];
+
+    if (x[i] < -20) x[i] = width + 20;
+    if (x[i] > width + 20) x[i] = -20;
+    if (y[i] < -20) y[i] = height + 20;
+    if (y[i] > height + 20) y[i] = -20;
+
+    spin[i] += 0.04 + i * 0.00005;
+    float size = 4 + 13 * abs(sin(spin[i]));
+    float hue = (185 + paletteShift + i * 1.6 + frameCount * 0.22) % 360;
+
+    noStroke();
+    fill(hue, 72, 96, 72);
+    ellipse(x[i], y[i], size, size);
+
+    if (i % 5 == 0) {
+      stroke(hue, 50, 100, 32);
+      strokeWeight(1.2);
+      line(x[i], y[i], x[i] - vx[i] * 11, y[i] - vy[i] * 11);
+    }
+  }
+}
+
+void drawHud() {
+  noStroke();
+  fill(0, 0, 100, 9);
+  rect(20, 20, 300, 58, 6);
+  fill(0, 0, 100, 92);
+  text("single PDE -> javac -> TeaVM FULL -> Wasm-GC", 170, 41);
+  fill(0, 0, 100, 62);
+  text("drag to attract, T toggles trails, P shifts palette", 170, 67);
+}
+
+void keyPressed() {
+  if (key == 't' || key == 'T') {
+    trails = !trails;
+  }
+  if (key == 'p' || key == 'P') {
+    paletteShift = (paletteShift + 47) % 360;
+  }
+}</textarea>
+        </section>
+
+        <section class="column" aria-label="Compiled sketch output">
+          <div class="stage">
+            <processing id="sketch" target="wasm-gc" sketch-name="SingleFileWasmDemo"></processing>
+          </div>
+          <div class="stats" aria-label="Compiler stats">
+            <div class="stat"><span>Compiler runtime</span><span id="compilerRuntime">Wasm-GC forced</span></div>
+            <div class="stat"><span>Sketch output</span><span id="sketchOutput">Wasm-GC forced</span></div>
+            <div class="stat"><span>Optimization</span><span>FULL</span></div>
+            <div class="stat"><span>Source files</span><span>1 PDE</span></div>
+            <div class="stat"><span>Worker startup</span><span id="workerStartupTime">pending</span></div>
+            <div class="stat"><span>Java compile</span><span id="compileTime">pending</span></div>
+            <div class="stat"><span>Wasm emit</span><span id="emitTime">pending</span></div>
+            <div class="stat"><span>Total load</span><span id="totalTime">pending</span></div>
+          </div>
+          <pre id="diagnostics" class="diagnostics">No diagnostics yet.</pre>
+        </section>
+      </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.9/lib/p5.min.js"></script>
+    <script type="module">
+      const runtimeVersion = Date.now();
+      const [{ runProcessingElement }, { getCompilerWasmGCSupport }] = await Promise.all([
+        import(`../../processing-teavm.js?v=${runtimeVersion}`),
+        import(`../../teavm-javac.js?v=${runtimeVersion}`),
+      ]);
+
+      const sourceInput = document.getElementById("source");
+      const sketchNameInput = document.getElementById("sketchName");
+      const filePicker = document.getElementById("filePicker");
+      const runButton = document.getElementById("runButton");
+      const sketchElement = document.getElementById("sketch");
+      const status = document.getElementById("status");
+      const statusText = document.getElementById("statusText");
+      const diagnostics = document.getElementById("diagnostics");
+      const compilerRuntime = document.getElementById("compilerRuntime");
+      const sketchOutput = document.getElementById("sketchOutput");
+      const workerStartupTime = document.getElementById("workerStartupTime");
+      const compileTime = document.getElementById("compileTime");
+      const emitTime = document.getElementById("emitTime");
+      const totalTime = document.getElementById("totalTime");
+
+      let activeResult = null;
+      let activeSourceUrl = null;
+      let worker = null;
+      let workerStartupMs = null;
+      let nextWorkerPingId = 1;
+      let runToken = 0;
+
+      function setStatus(state, message) {
+        status.dataset.state = state;
+        statusText.textContent = message;
+      }
+
+      function formatDuration(ms) {
+        if (!Number.isFinite(ms)) {
+          return "n/a";
+        }
+        return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
+      }
+
+      function setDuration(element, ms) {
+        element.textContent = formatDuration(ms);
+      }
+
+      function appendDiagnostic(item) {
+        const message = formatDiagnostic(item);
+        diagnostics.textContent = diagnostics.textContent === "No diagnostics yet."
+          ? message
+          : `${diagnostics.textContent}\n${message}`;
+      }
+
+      function formatDiagnostic(item) {
+        const severity = item?.severity ?? "diagnostic";
+        const fileName = item?.fileName && !String(item.fileName).startsWith("blob:")
+          ? item.fileName
+          : "Sketch.pde";
+        const line = item?.lineNumber ? `:${item.lineNumber}` : "";
+        const column = item?.columnNumber ? `:${item.columnNumber}` : "";
+        const generated = item?.generatedFileName
+          ? `\n  Java: ${item.generatedFileName}:${item.generatedLineNumber ?? "?"}${item.generatedColumnNumber ? `:${item.generatedColumnNumber}` : ""}`
+          : "";
+        return `${severity} ${fileName}${line}${column} ${item?.message ?? item}${generated}`.trim();
+      }
+
+      function diagnosticsFromError(error) {
+        const diagnostics = Array.isArray(error?.diagnostics) ? error.diagnostics : [];
+        const issues = Array.isArray(error?.issues) ? error.issues : [];
+        const preprocessedIssues = Array.isArray(error?.preprocessed?.issues) ? error.preprocessed.issues : [];
+        const seen = new Set();
+        return [...diagnostics, ...issues, ...preprocessedIssues].filter((item) => {
+          const key = JSON.stringify({
+            severity: item?.severity,
+            fileName: item?.fileName,
+            lineNumber: item?.lineNumber,
+            columnNumber: item?.columnNumber,
+            message: item?.message ?? String(item),
+          });
+          if (seen.has(key)) {
+            return false;
+          }
+          seen.add(key);
+          return true;
+        });
+      }
+
+      function formatBuildError(error) {
+        const items = diagnosticsFromError(error);
+        if (items.length > 0) {
+          return `Java compile failed:\n\n${items.map(formatDiagnostic).join("\n\n")}`;
+        }
+        return error?.stack ?? String(error);
+      }
+
+      function sanitizeSketchName(value) {
+        const cleaned = String(value || "SingleFileWasmDemo").replace(/[^A-Za-z0-9_$]/g, "");
+        const legal = /^[A-Za-z_$]/.test(cleaned) ? cleaned : `Sketch${cleaned}`;
+        return legal || "SingleFileWasmDemo";
+      }
+
+      async function ensureWorker() {
+        if (worker) {
+          return worker;
+        }
+        setStatus("idle", "Starting Processing worker");
+        const started = performance.now();
+        worker = new Worker(new URL(`../../processing-teavm-worker.js?v=${runtimeVersion}`, import.meta.url), {
+          type: "module",
+          name: "single-file-processing-codegen",
+        });
+        await waitForWorkerReady(worker);
+        workerStartupMs = performance.now() - started;
+        setDuration(workerStartupTime, workerStartupMs);
+        return worker;
+      }
+
+      function waitForWorkerReady(targetWorker) {
+        const id = `single-file-worker-ping-${nextWorkerPingId++}`;
+        return new Promise((resolve, reject) => {
+          const timeout = window.setTimeout(() => {
+            cleanup();
+            reject(new Error("Processing worker startup timed out"));
+          }, 15000);
+          const cleanup = () => {
+            window.clearTimeout(timeout);
+            targetWorker.removeEventListener("message", handleMessage);
+            targetWorker.removeEventListener("error", handleError);
+          };
+          const handleMessage = (event) => {
+            const message = event.data;
+            if (message?.id !== id) {
+              return;
+            }
+            cleanup();
+            message.type === "pong"
+              ? resolve()
+              : reject(new Error(`Unexpected worker startup response: ${message?.type ?? "unknown"}`));
+          };
+          const handleError = (event) => {
+            cleanup();
+            reject(new Error(event.message || "Processing worker failed to start"));
+          };
+          targetWorker.addEventListener("message", handleMessage);
+          targetWorker.addEventListener("error", handleError);
+          targetWorker.postMessage({ id, command: "ping" });
+        });
+      }
+
+      function disposeActiveSketch() {
+        if (activeResult?.p5 && typeof activeResult.p5.remove === "function") {
+          activeResult.p5.remove();
+        }
+        activeResult = null;
+        if (activeSourceUrl) {
+          URL.revokeObjectURL(activeSourceUrl);
+          activeSourceUrl = null;
+        }
+        sketchElement.replaceChildren();
+      }
+
+      async function runSketch() {
+        const thisRun = ++runToken;
+        runButton.disabled = true;
+        diagnostics.textContent = "No diagnostics yet.";
+        setStatus("idle", "Checking Wasm-GC support");
+        compileTime.textContent = "pending";
+        emitTime.textContent = "pending";
+        totalTime.textContent = "pending";
+
+        try {
+          const support = await getCompilerWasmGCSupport();
+          if (!support.supported) {
+            appendDiagnostic({
+              severity: "warning",
+              fileName: null,
+              message: `Wasm-GC compiler support was not detected: ${support.reason}. This page intentionally does not fall back to JS.`,
+            });
+          }
+
+          const targetWorker = await ensureWorker();
+          const sketchName = sanitizeSketchName(sketchNameInput.value);
+          sketchNameInput.value = sketchName;
+          disposeActiveSketch();
+
+          activeSourceUrl = URL.createObjectURL(new Blob([sourceInput.value], { type: "text/plain" }));
+          sketchElement.setAttribute("src", activeSourceUrl);
+          sketchElement.setAttribute("sketch-name", sketchName);
+
+          setStatus("idle", "Compiling FULL Wasm-GC");
+          const started = performance.now();
+          activeResult = await runProcessingElement(sketchElement, {
+            target: "wasm-gc",
+            output: "wasm-gc",
+            backend: "p5",
+            sourceMaps: false,
+            optimizationLevel: "full",
+            fastGlobalAnalysis: true,
+            fallbackToJs: false,
+            worker: targetWorker,
+            sketchName,
+            wasmName: `${sketchName}-full`,
+            coreUrl: new URL(`../../processing-core-teavm.jar?v=${runtimeVersion}`, import.meta.url),
+            sketchWasmRuntime: new URL(`../../compiler.wasm-runtime.js?v=${runtimeVersion}`, import.meta.url),
+            compilerOptions: {
+              backend: "wasm-gc",
+              fallbackToJs: false,
+              compilerWasm: new URL(`../../compiler.wasm?v=${runtimeVersion}`, import.meta.url),
+              compilerWasmRuntime: new URL(`../../compiler.wasm-runtime.js?v=${runtimeVersion}`, import.meta.url),
+            },
+            onState: (state) => {
+              setStatus("idle", state === "emitting" ? "Emitting FULL Wasm-GC" : "Compiling Java");
+            },
+          });
+
+          if (thisRun !== runToken) {
+            return;
+          }
+
+          const elapsed = performance.now() - started;
+          compilerRuntime.textContent = activeResult.compiler?.runtime?.backend ?? "Wasm-GC";
+          sketchOutput.textContent = activeResult.output;
+          setDuration(compileTime, activeResult.timings?.compileMs);
+          setDuration(emitTime, activeResult.timings?.emitMs);
+          setDuration(totalTime, elapsed);
+          if (activeResult.diagnostics.length > 0) {
+            diagnostics.textContent = activeResult.diagnostics.map(formatDiagnostic).join("\n");
+          } else if (diagnostics.textContent === "No diagnostics yet.") {
+            diagnostics.textContent = "Compiled one PDE file to FULL optimization Wasm-GC without diagnostics.";
+          }
+
+          const canvas = sketchElement.querySelector("canvas");
+          canvas?.setAttribute("tabindex", "0");
+          canvas?.addEventListener("pointerdown", () => canvas.focus());
+          canvas?.focus();
+          window.singleFileProcessingResult = activeResult;
+          setStatus("running", `Running after ${formatDuration(elapsed)}`);
+        } catch (error) {
+          console.error(error);
+          setStatus("error", "Build failed");
+          diagnostics.textContent = formatBuildError(error);
+        } finally {
+          runButton.disabled = false;
+        }
+      }
+
+      filePicker.addEventListener("change", async () => {
+        const file = filePicker.files?.[0];
+        if (!file) {
+          return;
+        }
+        sourceInput.value = await file.text();
+        const name = file.name.replace(/\.[^.]+$/, "");
+        sketchNameInput.value = sanitizeSketchName(name);
+      });
+
+      runButton.addEventListener("click", runSketch);
+      sketchElement.addEventListener("processingdiagnostic", (event) => appendDiagnostic(event.detail));
+      window.addEventListener("beforeunload", () => {
+        worker?.terminate();
+        if (activeSourceUrl) {
+          URL.revokeObjectURL(activeSourceUrl);
+        }
+      });
+
+      runSketch();
+    </script>
+  </body>
+</html>

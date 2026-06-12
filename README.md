@@ -15,6 +15,9 @@ Build prerequisites:
 - Binaryen `wasm-opt` installed. `:compiler:createDist` runs `wasm-opt -O4` over
   the generated Wasm-GC compiler. Put `wasm-opt` on `PATH`, or set `WASM_OPT` to
   the executable path.
+- Node.js and npm. The wrapper sources under `compiler/src/main/js` are
+  TypeScript and Gradle runs `npm install` plus `npm run build` during the
+  distribution build.
 
 ```sh
 ./gradlew :compiler:createDist
@@ -232,40 +235,123 @@ const teavm = await load(wasmBytes);
 const rawCompiler = teavm.exports.createCompiler();
 ```
 
-For emitted Java Wasm programs, prefer the runtime helpers instead of calling
-`runtime.exports.main(...)` directly. File opens can suspend and resume through
-TeaVM async methods, and direct `main(...)` calls do not provide a reliable
-"program finished" lifecycle for workers.
+### Runtime programs
+
+Do not call TeaVM `exports.main(...)` or Processing `exports.start(...)`
+directly. Create a program object, then call `program.execute(...)`. File opens
+can suspend and resume through TeaVM async methods, so the program object is the
+runtime lifecycle boundary.
+
+#### Runtime API
+
+```ts
+type JavaProgramOutput = (text: string) => void;
+
+interface JavaProgramStdioOptions {
+  stdin?: string;
+  stdout?: JavaProgramOutput;
+  stderr?: JavaProgramOutput;
+}
+
+interface JavaProgramFileSystemOptions {
+  onFileWrite?: (path: string, content: Uint8Array) => void;
+  onFileClose?: (path: string, mode: string, content: Uint8Array | null) => void;
+}
+
+interface JavaProgramOptions {
+  stdio?: false | JavaProgramStdioOptions;
+  fs?: false | JavaProgramFileSystemOptions;
+  wasmRuntime?: string | URL;
+  wasmRuntimeUrl?: string | URL;
+  runtimeModule?: {
+    load(wasmBytes: BinaryInput, options?: Record<string, unknown>): Promise<unknown>;
+  };
+  wasmRuntimeOptions?: Record<string, unknown>;
+  runtimeOptions?: Record<string, unknown>;
+}
+
+interface ProcessingProgramOptions extends JavaProgramOptions {
+  sketchWasmRuntime?: string | URL;
+  sketchWasmRuntimeUrl?: string | URL;
+  sketchWasmRuntimeOptions?: Record<string, unknown>;
+}
+```
+
+Runtime helpers:
+
+```ts
+createJavaProgramOptions(options?): JavaProgramOptions
+createJavaProgram(wasmBytes, options?): Promise<JavaProgram>
+createProcessingProgramOptions(options?): ProcessingProgramOptions
+createProcessingProgram(wasmBytes, options?): Promise<ProcessingProgram>
+createCanvas2DBackend(parent, options?): ProcessingCanvas2DBackend
+
+class JavaProgram {
+  wasmProgram: unknown;
+  exports: unknown;
+  instance: unknown;
+  module: unknown;
+  execute(options?: {
+    args?: string[];
+    onFinish?: (result: { program: JavaProgram }) => void;
+    timeoutMs?: number;
+  }): Promise<{ program: JavaProgram }>;
+}
+
+class ProcessingProgram {
+  wasmProgram: unknown;
+  exports: unknown;
+  instance: unknown;
+  module: unknown;
+  execute(options: { canvasBackend: ProcessingCanvas2DBackend }): unknown;
+}
+```
+
+Runtime option rules:
+
+- `stdio.stdin` is a string.
+- `stdio.stdout` and `stdio.stderr` are functions that receive text chunks.
+- `stdio: false` skips stdio import installation.
+- Java and Processing reads use browser `fetch(path)`.
+- There is no `onFileOpen` callback.
+- `fs.onFileWrite(path, content)` and
+  `fs.onFileClose(path, mode, content)` are synchronous callbacks.
+- `content` is a `Uint8Array`; read closes pass `null`.
+- `fs: false` skips file import installation.
+
+File path rules:
+
+- Raw Java file APIs use the requested path exactly. `new File("data.txt")`
+  opens `data.txt`.
+- Processing file APIs follow Processing lookup behavior. `loadImage("x.png")`
+  and `createInput("x.txt")` try the sketch `data/` location before the
+  literal path.
+- Missing Java file reads surface as Java file errors such as
+  `FileNotFoundException`.
+- Missing Processing images return `null` and print a Processing-style error.
+
+#### Standard Java flow
 
 ```js
-import { createCompiler, runJavaWasm } from "./teavm-javac.js";
+import { createJavaProgram } from "./teavm-javac.js";
 
-const compiler = await createCompiler();
-compiler.addSource("Main.java", `
-import java.io.File;
-import java.util.Scanner;
-
-public class Main {
-  public static void main(String[] args) throws Exception {
-    Scanner scanner = new Scanner(new File("data.txt"));
-    while (scanner.hasNextLine()) {
-      System.out.println(scanner.nextLine());
-    }
-    scanner.close();
-  }
-}
-`);
-
-if (!compiler.compile()) {
-  throw new Error("Java compilation failed");
-}
-
-const wasm = compiler.emitWasm({
-  mainClass: "Main",
-  optimizationLevel: "simple",
+const program = await createJavaProgram(wasmBytes, {
+  stdio: {
+    stdin: "",
+    stdout: (text) => console.log(text),
+    stderr: (text) => console.error(text),
+  },
+  fs: {
+    onFileWrite: (path, content) => {
+      console.log("write", path, content);
+    },
+    onFileClose: (path, mode, content) => {
+      console.log("close", path, mode, content);
+    },
+  },
 });
 
-await runJavaWasm(wasm.bytes, {
+await program.execute({
   args: [],
   onFinish: () => {
     console.log("Java main finished");
@@ -273,46 +359,41 @@ await runJavaWasm(wasm.bytes, {
 });
 ```
 
-If you need to load the Wasm runtime yourself, use `loadJavaWasm(...)` and then
-`runJavaMain(...)`:
+`emitJs({ module: "esm" })` appends the same program-style API to generated
+JavaScript output: call `createJavaProgram(options)` and then
+`program.execute(...)`. The JS program object has the same lifecycle shape as
+the Wasm program object, but it does not load Wasm bytes.
+
+#### Standard Processing flow
 
 ```js
-import { loadJavaWasm, runJavaMain } from "./teavm-javac.js";
+import {
+  createCanvas2DBackend,
+  createProcessingProgram,
+} from "./processing-teavm.js";
 
-const runtime = await loadJavaWasm(wasmBytes);
-await runJavaMain(runtime, [], {
-  onFinish: () => console.log("finished"),
+const program = await createProcessingProgram(wasmBytes, {
+  stdio: {
+    stdin: "",
+    stdout: (text) => console.log(text),
+    stderr: (text) => console.error(text),
+  },
+  fs: {
+    onFileWrite: (path, content) => {
+      console.log("write", path, content);
+    },
+    onFileClose: (path, mode, content) => {
+      console.log("close", path, mode, content);
+    },
+  },
 });
+
+const backend = createCanvas2DBackend(document.body, {});
+const sketch = program.execute({ canvasBackend: backend });
 ```
 
-Runtime file behavior:
-
-- Raw Java file APIs use the requested path exactly. `new File("data.txt")`
-  opens `data.txt`; the Java layer does not add `data/`.
-- Reads are implemented through TeaVM async coroutine imports and browser
-  `fetch(path)`. The returned bytes are loaded into TeaVM's virtual file system
-  before Java file APIs continue.
-- Writes and closes are synchronous at the Java/JS boundary.
-- Missing files from Java file APIs surface as Java file errors such as
-  `FileNotFoundException`.
-
-The Java runtime helper exports are:
-
-```ts
-loadJavaWasm(wasmBytes, options?): Promise<runtime>
-runJavaMain(runtime, args?, options?): Promise<{ runtime }>
-runJavaWasm(wasmBytes, options?): Promise<{ runtime }>
-setActiveRuntime(runtime): runtime
-```
-
-`runJavaMain` and `runJavaWasm` accept `onFinish` and `timeoutMs`.
-
-In a more complex scenario, you can re-use existing compiler instance without passing SDK and classlib again.
-This should also make repeated compilation faster, since compilers can re-use results of previous builds.
-
-### Processing runtime
-
-Use the Processing module for `.pde` sketches:
+The Processing high-level runner still exists for pages that use
+`<processing>` tags:
 
 ```js
 import { runProcessingElement } from "./processing-teavm.js";
@@ -323,79 +404,12 @@ await runProcessingElement(document.querySelector("processing"), {
 });
 ```
 
-For manual mounting:
-
-```js
-import {
-  createCanvas2DBackend,
-  generateProcessingSketch,
-  setActiveRuntime,
-} from "./processing-teavm.js";
-
-const generated = await generateProcessingSketch([
-  {
-    path: "Sketch.pde",
-    content: `
-PImage img;
-
-void setup() {
-  size(200, 200);
-  img = loadImage("image.png");
-}
-
-void draw() {
-  background(255);
-  image(img, 50, 50, 100, 100);
-}
-`,
-  },
-], {
-  backend: "canvas2d",
-  output: "wasm-gc",
-});
-
-const runtimeModule = await import("./compiler.wasm-runtime.js");
-const runtime = await runtimeModule.load(generated.wasmBytes);
-setActiveRuntime(runtime);
-
-const backend = createCanvas2DBackend(document.body, {});
-const sketch = runtime.exports.start(backend);
-```
-
-There is no external `fs` object to install. The generated Wasm runtime imports
-the file bridge automatically, and `setActiveRuntime(runtime)` only marks which
-TeaVM runtime should receive async file completions.
-
-Processing file and asset behavior:
-
-- `createInput("name.ext")` follows Processing lookup behavior. It tries the
-  sketch `data/` location first and then the provided path.
-- Raw Java file APIs do not do this Processing `data/` lookup.
-- `loadImage(...)`, `loadFont(...)`, `createInput(...)`, and image/font decode
-  all go through the same file-read path.
-- `loadImage(...)` returns `null` for missing images and prints
-  `The image <path> could not be found.`, matching Processing behavior.
-- `PImage.pixels[]` is a staging array. `loadPixels()` copies native image data
-  into `pixels[]`; edits to `pixels[]` affect drawing/saving only after
-  `updatePixels()`.
-- Image-level operations such as `resize()`, `get()`, `set()`, `copy()`,
-  `mask()`, `filter()`, `blend()`, and `save()` synchronize with the native
-  decoded image at the method boundary.
-
-The Processing module exports the high-level runners and lower-level building
-blocks:
-
-```ts
-runProcessingSketches(options?): Promise<ProcessingRunResult[]>
-runProcessingElement(element, options?, index?): Promise<ProcessingRunResult>
-compileProcessingSketch(sources, options?): Promise<ProcessingCompileResult>
-generateProcessingSketch(sources, options?): Promise<ProcessingGeneratedSketch>
-emitProcessingSketch(compiled, options?): ProcessingGeneratedSketch
-emitProcessingSketchWithFallback(compiled, options?): Promise<ProcessingGeneratedSketch>
-preprocessProcessing(sources, options?): Promise<ProcessingPreprocessResult>
-createCanvas2DBackend(parent, options?): ProcessingCanvas2DBackend
-setActiveRuntime(runtime): runtime
-```
+Processing image behavior follows Processing's `PImage` contract.
+`loadPixels()` copies native image data into `pixels[]`; edits to `pixels[]`
+affect drawing and saving only after `updatePixels()`. Image-level operations
+such as `resize()`, `get()`, `set()`, `copy()`, `mask()`, `filter()`,
+`blend()`, and `save()` synchronize with the native decoded image at the method
+boundary.
 
 ### Using simple worker
 

@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>TeaVM Processing 2D Forge</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101116;
+        --panel: #191b22;
+        --ink: #f2f4f8;
+        --muted: #a7adb9;
+        --line: #303441;
+        --accent: #52d2b8;
+        --warn: #f3bf65;
+        --bad: #ff6b7a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 15% 12%, rgba(82, 210, 184, 0.16), transparent 30rem),
+          radial-gradient(circle at 85% 10%, rgba(103, 151, 255, 0.14), transparent 28rem),
+          var(--bg);
+        color: var(--ink);
+        font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      main {
+        width: min(1200px, calc(100vw - 32px));
+        margin: 0 auto;
+        padding: 20px 0 24px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        min-height: 48px;
+        margin-bottom: 14px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(20px, 2.4vw, 28px);
+        font-weight: 720;
+        letter-spacing: 0;
+      }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        min-width: 178px;
+        justify-content: flex-end;
+        color: var(--muted);
+        font-size: 13px;
+        white-space: nowrap;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 999px;
+        background: var(--warn);
+        box-shadow: 0 0 24px rgba(243, 191, 101, 0.75);
+      }
+
+      .status[data-state="running"] .dot {
+        background: var(--accent);
+        box-shadow: 0 0 24px rgba(82, 210, 184, 0.8);
+      }
+
+      .status[data-state="error"] .dot {
+        background: var(--bad);
+        box-shadow: 0 0 24px rgba(255, 107, 122, 0.8);
+      }
+
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 286px;
+        gap: 14px;
+        align-items: start;
+      }
+
+      .stage {
+        min-width: 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #0c0d12;
+        overflow: hidden;
+        box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28);
+      }
+
+      processing {
+        display: grid;
+        place-items: center;
+        min-height: 620px;
+      }
+
+      processing[data-processing-state="compiling"]::before,
+      processing[data-processing-state="emitting"]::before {
+        content: "Compiling Processing sketch...";
+        color: var(--muted);
+      }
+
+      processing canvas {
+        display: block;
+        width: 100% !important;
+        max-width: 960px;
+        height: auto !important;
+        outline: none;
+      }
+
+      .panel {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: color-mix(in srgb, var(--panel) 92%, black);
+        padding: 14px;
+      }
+
+      .panel h2 {
+        margin: 0 0 10px;
+        font-size: 13px;
+        font-weight: 680;
+        color: var(--muted);
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .stats {
+        display: grid;
+        gap: 9px;
+      }
+
+      .stat {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+        min-height: 24px;
+      }
+
+      .stat span:first-child {
+        color: var(--muted);
+      }
+
+      .stat span:last-child {
+        font-variant-numeric: tabular-nums;
+      }
+
+      .keys {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      kbd {
+        display: grid;
+        place-items: center;
+        min-height: 34px;
+        border: 1px solid #3b4050;
+        border-radius: 6px;
+        background: #11131a;
+        color: var(--ink);
+        font: 650 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .diagnostics {
+        margin: 14px 0 0;
+        min-height: 88px;
+        max-height: 180px;
+        overflow: auto;
+        border-radius: 6px;
+        background: #101218;
+        color: var(--muted);
+        padding: 10px;
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        white-space: pre-wrap;
+      }
+
+      @media (max-width: 920px) {
+        main {
+          width: min(100vw - 20px, 960px);
+          padding-top: 12px;
+        }
+
+        .topbar,
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+
+        .topbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+
+        .status {
+          justify-content: flex-start;
+          min-width: 0;
+        }
+
+        .workspace {
+          display: grid;
+        }
+
+        processing {
+          min-height: 64vw;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="topbar">
+        <h1>TeaVM Processing 2D Forge</h1>
+        <div id="status" class="status" data-state="loading">
+          <span class="dot" aria-hidden="true"></span>
+          <span id="statusText">Loading compiler</span>
+        </div>
+      </div>
+
+      <div class="workspace">
+        <section class="stage" aria-label="Processing sketch output">
+          <processing
+            id="sketch"
+            src="./kinetic-showcase-single.pde"
+            target="wasm-gc"
+            sketch-name="StellarForge2D"></processing>
+        </section>
+
+        <aside class="panel" aria-label="Sketch state">
+          <h2>Runtime</h2>
+          <div class="stats">
+            <div class="stat"><span>Compiler</span><span>TeaVM javac</span></div>
+            <div class="stat"><span>Backend</span><span>p5.js</span></div>
+            <div class="stat"><span>Target</span><span>Wasm-GC</span></div>
+            <div class="stat"><span>Optimization</span><span>SIMPLE</span></div>
+            <div class="stat"><span>Analysis</span><span>Fast global</span></div>
+            <div class="stat"><span>Source</span><span>Single-file 2D</span></div>
+            <div class="stat"><span>Sketch</span><span id="sketchName">pending</span></div>
+            <div class="stat"><span>Source tabs</span><span id="sourceCount">0</span></div>
+            <div class="stat"><span>Output files</span><span id="fileCount">0</span></div>
+            <div class="stat"><span>Worker startup</span><span id="workerStartupTime">pending</span></div>
+            <div class="stat"><span>Java compile</span><span id="compileTime">pending</span></div>
+            <div class="stat"><span>Wasm emit</span><span id="emitTime">pending</span></div>
+            <div class="stat"><span>Codegen total</span><span id="codegenTime">pending</span></div>
+            <div class="stat"><span>Full load</span><span id="fullLoadTime">pending</span></div>
+          </div>
+
+          <div class="keys" aria-label="Keyboard controls">
+            <kbd title="Move the field attractor">Mouse</kbd>
+            <kbd title="Switch flow mode">1</kbd>
+            <kbd title="Switch gravity mode">2</kbd>
+            <kbd title="Switch vortex mode">3</kbd>
+            <kbd title="Pause or resume">Space</kbd>
+            <kbd title="Toggle field">F</kbd>
+            <kbd title="Toggle trails">T</kbd>
+            <kbd title="Shift palette">P</kbd>
+            <kbd title="Reset scene">R</kbd>
+          </div>
+
+          <pre id="diagnostics" class="diagnostics">No diagnostics yet.</pre>
+        </aside>
+      </div>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.11.9/lib/p5.min.js"></script>
+    <script type="module">
+      const runtimeVersion = Date.now();
+      const { runProcessingElement } = await import(`../processing-teavm.js?v=${runtimeVersion}`);
+      const sketchElement = document.getElementById("sketch");
+      const status = document.getElementById("status");
+      const statusText = document.getElementById("statusText");
+      const diagnostics = document.getElementById("diagnostics");
+      const sketchName = document.getElementById("sketchName");
+      const sourceCount = document.getElementById("sourceCount");
+      const fileCount = document.getElementById("fileCount");
+      const workerStartupTime = document.getElementById("workerStartupTime");
+      const compileTime = document.getElementById("compileTime");
+      const emitTime = document.getElementById("emitTime");
+      const codegenTime = document.getElementById("codegenTime");
+      const fullLoadTime = document.getElementById("fullLoadTime");
+      let nextWorkerPingId = 1;
+
+      function setStatus(state, message) {
+        status.dataset.state = state;
+        statusText.textContent = message;
+      }
+
+      function formatDuration(ms) {
+        if (!Number.isFinite(ms)) {
+          return "n/a";
+        }
+        return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
+      }
+
+      function setDuration(element, ms) {
+        element.textContent = formatDuration(ms);
+      }
+
+      function waitForWorkerReady(worker) {
+        const id = `demo-worker-ping-${nextWorkerPingId++}`;
+        return new Promise((resolve, reject) => {
+          const timeout = window.setTimeout(() => {
+            cleanup();
+            reject(new Error("Processing worker startup timed out"));
+          }, 15000);
+          const cleanup = () => {
+            window.clearTimeout(timeout);
+            worker.removeEventListener("message", handleMessage);
+            worker.removeEventListener("error", handleError);
+          };
+          const handleMessage = (event) => {
+            const message = event.data;
+            if (message?.id !== id) {
+              return;
+            }
+            cleanup();
+            if (message.type === "pong") {
+              resolve();
+            } else {
+              reject(new Error(`Unexpected worker startup response: ${message?.type ?? "unknown"}`));
+            }
+          };
+          const handleError = (event) => {
+            cleanup();
+            reject(new Error(event.message || "Processing worker failed to start"));
+          };
+
+          worker.addEventListener("message", handleMessage);
+          worker.addEventListener("error", handleError);
+          worker.postMessage({ id, command: "ping" });
+        });
+      }
+
+      sketchElement.addEventListener("processingdiagnostic", (event) => {
+        const item = event.detail;
+        diagnostics.textContent = `${item.severity ?? "diagnostic"} ${item.fileName ?? ""}:${item.lineNumber ?? ""} ${item.message ?? ""}`.trim();
+      });
+
+      let worker = null;
+      try {
+        setStatus("loading", "Starting worker");
+        const workerStarted = performance.now();
+        worker = new Worker(new URL(`../processing-teavm-worker.js?v=${runtimeVersion}`, import.meta.url), {
+          type: "module",
+          name: "processing-demo-codegen",
+        });
+        await waitForWorkerReady(worker);
+        const workerStartupMs = performance.now() - workerStarted;
+        setDuration(workerStartupTime, workerStartupMs);
+
+        setStatus("loading", "Fetching sketch");
+        const fullLoadStarted = performance.now();
+        const result = await runProcessingElement(sketchElement, {
+          coreUrl: new URL(`../processing-core-teavm.jar?v=${runtimeVersion}`, import.meta.url),
+          target: "wasm-gc",
+          sourceMaps: true,
+          optimizationLevel: "simple",
+          fastGlobalAnalysis: true,
+          worker,
+          onState: (state) => {
+            setStatus("loading", state === "emitting" ? "Emitting Wasm-GC" : "Compiling sketch");
+          },
+        });
+        const fullLoadMs = performance.now() - fullLoadStarted;
+        const timings = {
+          ...(result.timings ?? {}),
+          workerStartupMs,
+          fullLoadMs,
+        };
+
+        setStatus("running", `Running after ${formatDuration(fullLoadMs)}`);
+        sketchName.textContent = result.preprocessed.className;
+        sourceCount.textContent = String(result.preprocessed.tabs.length);
+        fileCount.textContent = String(result.files.length);
+        setDuration(compileTime, timings.compileMs);
+        setDuration(emitTime, timings.emitMs);
+        setDuration(codegenTime, timings.totalMs);
+        setDuration(fullLoadTime, fullLoadMs);
+        diagnostics.textContent = result.diagnostics.length
+          ? result.diagnostics.map((item) => `${item.severity ?? "diagnostic"} ${item.fileName ?? ""}:${item.lineNumber ?? ""} ${item.message ?? ""}`.trim()).join("\n")
+          : "Compilation completed without diagnostics.";
+
+        const canvas = sketchElement.querySelector("canvas");
+        canvas?.setAttribute("tabindex", "0");
+        canvas?.addEventListener("pointerdown", () => canvas.focus());
+        canvas?.focus();
+        window.processingDemoResult = result;
+        window.processingDemoTimings = timings;
+      } catch (error) {
+        console.error(error);
+        setStatus("error", "Build failed");
+        diagnostics.textContent = error?.stack ?? String(error);
+      } finally {
+        worker?.terminate();
+      }
+    </script>
+  </body>
+</html>

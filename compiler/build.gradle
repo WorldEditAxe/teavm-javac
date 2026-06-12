@@ -55,14 +55,10 @@ sourceSets {
         }
     }
     classlibEmu {
-        java {
-            srcDir "src/sharedClasslibEmu/java"
-        }
+        java.srcDir "src/sharedClasslibEmu/java"
     }
     runtimeClasslibEmu {
-        java {
-            srcDir "src/sharedClasslibEmu/java"
-        }
+        java.srcDir "src/sharedClasslibEmu/java"
         compileClasspath += configurations.classlibInput + configurations.classlibAuxInput
     }
 }
@@ -190,6 +186,7 @@ def prepareTeaVMClassLib = tasks.register("prepareTeaVMClassLib", Copy) {
         include "org/teavm/classlib/java/io/TSyncFailedException.class"
         include "org/teavm/classlib/java/nio/TByteBuffer.class"
         include "org/teavm/classlib/java/nio/TCharBuffer.class"
+        include "org/teavm/classlib/java/lang/TConsoleInputStream.class"
         include "org/teavm/classlib/java/util/TInputMismatchException.class"
         include "org/teavm/classlib/java/util/TScanner*.class"
         include "org/teavm/runtime/EventQueue*.class"
@@ -214,34 +211,74 @@ def buildTeaVMClassLib = tasks.register("buildTeaVMClassLib", JavaExec) {
     mainClass = "org.teavm.javac.ArchiveBuilder"
 }
 
+def npmSourceDir = layout.projectDirectory.dir("src/main/js")
+def npmOutputDir = layout.buildDirectory.dir("generated/npm")
+
+def installNpmDependencies = tasks.register("installNpmDependencies", Exec) {
+    group "build"
+    inputs.file npmSourceDir.file("package.json")
+    outputs.dir npmSourceDir.dir("node_modules")
+    workingDir npmSourceDir.asFile
+    commandLine "npm", "install"
+}
+
+def compileNpmWrapper = tasks.register("compileNpmWrapper", Exec) {
+    group "build"
+    dependsOn installNpmDependencies
+    inputs.files fileTree(npmSourceDir.asFile) {
+        include "*.ts"
+        include "package.json"
+        include "tsconfig.json"
+    }
+    outputs.dir npmOutputDir
+    workingDir npmSourceDir.asFile
+    commandLine "npm", "run", "build"
+}
+
 def wasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc")
 def optimizedWasmGcOutputDir = layout.buildDirectory.dir("generated/teavm/wasm-gc-optimized")
 
 def patchWasmGCRuntime = tasks.register("patchWasmGCRuntime") {
+    group "build"
+    description "Patches generated TeaVM Wasm-GC runtime loaders for stdio, file imports, and active program tracking."
     dependsOn generateWasmGC, copyWasmGCRuntime
-    def runtimeFile = wasmGcOutputDir.map { it.file("compiler.wasm-runtime.js") }
-    inputs.file runtimeFile
-    outputs.file runtimeFile
+    def runtimeFiles = provider {
+        fileTree(wasmGcOutputDir.get().asFile) {
+            include "*.wasm-runtime.js"
+        }
+    }
+    inputs.files(runtimeFiles)
+    outputs.files(runtimeFiles)
 
     doLast {
-        def file = runtimeFile.get().asFile
-        def text = file.getText("UTF-8")
-        if (!text.contains("globalThis.__teavmInstallFileImports")) {
-            def needle = "if(typeof t.installImports!==\"undefined\"){t.installImports(f)}"
-            def replacement = needle + "if(typeof globalThis!==\"undefined\"&&typeof globalThis.__teavmInstallFileImports===\"function\"){globalThis.__teavmInstallFileImports(f)}"
-            if (!text.contains(needle)) {
-                throw new GradleException("Could not patch TeaVM Wasm-GC runtime import installer")
+        fileTree(wasmGcOutputDir.get().asFile) {
+            include "*.wasm-runtime.js"
+        }.files.each { runtimeFile ->
+            def text = runtimeFile.getText("UTF-8")
+            if (!text.contains("readStdin(){return -1}")) {
+                def patched = text.replace("e.teavmConsole={putcharStderr", "e.teavmConsole={readStdin(){return -1},putcharStderr")
+                if (patched == text) {
+                    throw new GradleException("Could not patch stdin default into ${runtimeFile.name}")
+                }
+                text = patched
             }
-            file.setText(text.replace(needle, replacement), "UTF-8")
-            text = file.getText("UTF-8")
-        }
-        if (!text.contains("globalThis.__teavmActiveRuntime=w")) {
-            def needle = "const w={exports:p,instance:b,module:c};"
-            def replacement = needle + "if(typeof globalThis!==\"undefined\"){globalThis.__teavmActiveRuntime=w}"
-            if (!text.contains(needle)) {
-                throw new GradleException("Could not patch TeaVM Wasm-GC active runtime installer")
+            if (!text.contains("globalThis.__teavmInstallFileImports")) {
+                def needle = "if(typeof t.installImports!==\"undefined\"){t.installImports(f)}"
+                def replacement = needle + "if(typeof globalThis!==\"undefined\"&&typeof globalThis.__teavmInstallFileImports===\"function\"){globalThis.__teavmInstallFileImports(f)}"
+                if (!text.contains(needle)) {
+                    throw new GradleException("Could not patch TeaVM Wasm-GC runtime import installer into ${runtimeFile.name}")
+                }
+                text = text.replace(needle, replacement)
             }
-            file.setText(text.replace(needle, replacement), "UTF-8")
+            if (!text.contains("globalThis.__teavmActiveProgram=w")) {
+                def needle = "const w={exports:p,instance:b,module:c};"
+                def replacement = needle + "if(typeof globalThis!==\"undefined\"){globalThis.__teavmActiveProgram=w}"
+                if (!text.contains(needle)) {
+                    throw new GradleException("Could not patch TeaVM Wasm-GC active program installer into ${runtimeFile.name}")
+                }
+                text = text.replace(needle, replacement)
+            }
+            runtimeFile.setText(text, "UTF-8")
         }
     }
 }
@@ -303,10 +340,18 @@ build {
 
 def createDist = tasks.register("createDist", Zip) {
     group "build"
-    dependsOn generateJavaScript, optimizeWasmGC, patchWasmGCRuntime
+    dependsOn generateJavaScript, optimizeWasmGC, compileNpmWrapper
     from buildTeaVMClassLib
     from generateClassLib
-    from "src/main/js"
+    from(npmSourceDir) {
+        include "package.json"
+        include "tsconfig.json"
+        include "processing-core-teavm.jar"
+    }
+    from(npmOutputDir) {
+        include "*.js"
+        include "*.d.ts"
+    }
     from layout.buildDirectory.dir("generated/teavm/js")
     from(wasmGcOutputDir) {
         exclude "*.wasm"
@@ -316,6 +361,33 @@ def createDist = tasks.register("createDist", Zip) {
     }
     exclude "src/**"
     archiveBaseName = "dist"
+}
+
+def npmPackageDir = rootProject.layout.buildDirectory.dir("npm-package")
+def npmTarballDir = rootProject.layout.projectDirectory.dir("dist/npm")
+
+def prepareNpmPackage = tasks.register("prepareNpmPackage", Sync) {
+    group "distribution"
+    description "Unpacks the compiler distribution into an npm package staging directory."
+    dependsOn createDist
+    from(createDist.map { zipTree(it.archiveFile) })
+    into npmPackageDir
+}
+
+def packNpmPackage = tasks.register("packNpmPackage", Exec) {
+    group "distribution"
+    description "Creates a local npm-installable tarball in dist/npm without publishing it."
+    dependsOn prepareNpmPackage
+    inputs.dir npmPackageDir
+    outputs.dir npmTarballDir
+    doFirst {
+        delete fileTree(npmTarballDir.asFile) {
+            include "*.tgz"
+        }
+        npmTarballDir.asFile.mkdirs()
+    }
+    workingDir npmPackageDir.get().asFile
+    commandLine "npm", "pack", ".", "--pack-destination", npmTarballDir.asFile.absolutePath
 }
 
 artifacts.add("dist", createDist)

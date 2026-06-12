@@ -129,16 +129,7 @@ public class PGraphicsP5 extends PGraphics {
       pixels = new int[pixelWidth * pixelHeight];
     }
 
-    P5Bridge.loadPixels(p5());
-    int pixelCount = Math.min(pixels.length, P5Bridge.pixelLength(p5()) / 4);
-    for (int i = 0; i < pixelCount; i++) {
-      int base = i * 4;
-      int r = P5Bridge.pixel(p5(), base);
-      int g = P5Bridge.pixel(p5(), base + 1);
-      int b = P5Bridge.pixel(p5(), base + 2);
-      int a = P5Bridge.pixel(p5(), base + 3);
-      pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
-    }
+    P5Bridge.loadPixelsAndCopyHostPixelsToIntArray(p5(), pixels, pixels.length);
     setLoaded();
   }
 
@@ -149,17 +140,7 @@ public class PGraphicsP5 extends PGraphics {
       return;
     }
 
-    P5Bridge.loadPixels(p5());
-    int pixelCount = Math.min(pixels.length, P5Bridge.pixelLength(p5()) / 4);
-    for (int i = 0; i < pixelCount; i++) {
-      int argb = pixels[i];
-      int base = i * 4;
-      P5Bridge.setPixel(p5(), base, (argb >> 16) & 0xff);
-      P5Bridge.setPixel(p5(), base + 1, (argb >> 8) & 0xff);
-      P5Bridge.setPixel(p5(), base + 2, argb & 0xff);
-      P5Bridge.setPixel(p5(), base + 3, (argb >>> 24) & 0xff);
-    }
-    P5Bridge.updatePixels(p5());
+    P5Bridge.loadAndWriteHostPixels(p5(), pixels, pixels.length);
     super.updatePixels(x, y, w, h);
   }
 

@@ -40,7 +40,7 @@ public final class TFileSystemBridge {
     }
 
     public static void install(JSObject runtime) {
-        setActiveRuntimeExternal(runtime);
+        setActiveProgramExternal(runtime);
     }
 
     static void beforeRead(TFile file) throws IOException {
@@ -166,14 +166,14 @@ public final class TFileSystemBridge {
         return bytes;
     }
 
-    @Import(module = "teavmFile", name = "setActiveRuntime")
+    @Import(module = "teavmFile", name = "setActiveProgram")
     @JSBody(params = { "runtime" }, script = ""
-            + "if (globalThis.teavmFile && typeof globalThis.teavmFile.setActiveRuntime === 'function') {"
-            + "  globalThis.teavmFile.setActiveRuntime(runtime);"
+            + "if (globalThis.teavmFile && typeof globalThis.teavmFile.setActiveProgram === 'function') {"
+            + "  globalThis.teavmFile.setActiveProgram(runtime);"
             + "} else {"
-            + "  globalThis.__teavmActiveRuntime = runtime || null;"
+            + "  globalThis.__teavmActiveProgram = runtime || null;"
             + "}")
-    private static native void setActiveRuntimeExternal(JSObject runtime);
+    private static native void setActiveProgramExternal(JSObject runtime);
 
     @Async
     private static native int openExternal(Int8Array pathBytes, Int8Array modeBytes);

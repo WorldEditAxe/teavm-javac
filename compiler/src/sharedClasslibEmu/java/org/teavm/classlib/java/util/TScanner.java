@@ -1,5 +1,5 @@
 /*
- *  Copyright 2026.
+ *  Copyright 2026 Alexey Andreev.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -13,10 +13,8 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-
 package org.teavm.classlib.java.util;
 
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
@@ -24,12 +22,15 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.Reader;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.channels.ReadableByteChannel;
 import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CoderResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.DecimalFormatSymbols;
@@ -39,7 +40,6 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Spliterator;
 import java.util.Spliterators;
-import java.util.function.Consumer;
 import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -47,34 +47,31 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 public final class TScanner implements Iterator<String>, Closeable {
-    private static final int BUFFER_SIZE = 1024;
     private static final Pattern DEFAULT_DELIMITER = Pattern.compile("\\p{javaWhitespace}+");
     private static final Pattern BOOLEAN_PATTERN = Pattern.compile("true|false", Pattern.CASE_INSENSITIVE);
+    private static final int BUFFER_SIZE = 2048;
 
-    private String input;
-    private int position;
+    private Readable source;
     private Pattern delimiter = DEFAULT_DELIMITER;
     private Locale locale = Locale.getDefault();
+    private final Locale initialLocale = locale;
     private int radix = 10;
-    private IOException ioException;
-    private MatchResult lastMatch;
-    private Closeable closeable;
+    private IOException lastIOException;
+    private String input;
+    private int position;
     private boolean closed;
+    private MatchResult lastMatch;
 
     public TScanner(Readable source) {
-        Objects.requireNonNull(source);
-        readReadable(source);
-        if (source instanceof Closeable) {
-            closeable = (Closeable) source;
-        }
+        this.source = Objects.requireNonNull(source);
     }
 
     public TScanner(InputStream source) {
-        this(new InputStreamReader(Objects.requireNonNull(source)));
+        this(new InputStreamReader(Objects.requireNonNull(source), Charset.defaultCharset()));
     }
 
     public TScanner(InputStream source, String charsetName) {
-        this(new InputStreamReader(Objects.requireNonNull(source), Charset.forName(charsetName)));
+        this(source, Charset.forName(Objects.requireNonNull(charsetName)));
     }
 
     public TScanner(InputStream source, Charset charset) {
@@ -86,7 +83,8 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public TScanner(File source, String charsetName) throws FileNotFoundException {
-        this(new FileInputStream(Objects.requireNonNull(source)), charsetName);
+        this(new InputStreamReader(new FileInputStream(Objects.requireNonNull(source)),
+                Charset.forName(Objects.requireNonNull(charsetName))));
     }
 
     public TScanner(File source, Charset charset) throws IOException {
@@ -98,7 +96,7 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public TScanner(Path source, String charsetName) throws IOException {
-        this(Files.newInputStream(Objects.requireNonNull(source)), charsetName);
+        this(source, Charset.forName(Objects.requireNonNull(charsetName)));
     }
 
     public TScanner(Path source, Charset charset) throws IOException {
@@ -114,14 +112,11 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public TScanner(ReadableByteChannel source, String charsetName) {
-        this(source, Charset.forName(charsetName));
+        this(source, Charset.forName(Objects.requireNonNull(charsetName)));
     }
 
     public TScanner(ReadableByteChannel source, Charset charset) {
-        Objects.requireNonNull(source);
-        Objects.requireNonNull(charset);
-        closeable = source;
-        readChannel(source, charset);
+        this(new ChannelReader(Objects.requireNonNull(source), Objects.requireNonNull(charset)));
     }
 
     @Override
@@ -130,92 +125,81 @@ public final class TScanner implements Iterator<String>, Closeable {
             return;
         }
         closed = true;
-        input = "";
-        position = 0;
-        if (closeable != null) {
+        if (source instanceof Closeable) {
             try {
-                closeable.close();
+                ((Closeable) source).close();
             } catch (IOException e) {
-                ioException = e;
+                lastIOException = e;
             }
         }
     }
 
     public IOException ioException() {
-        return ioException;
+        return lastIOException;
     }
 
     public Pattern delimiter() {
-        ensureOpen();
         return delimiter;
     }
 
     public TScanner useDelimiter(Pattern pattern) {
-        ensureOpen();
         delimiter = Objects.requireNonNull(pattern);
         return this;
     }
 
     public TScanner useDelimiter(String pattern) {
-        return useDelimiter(Pattern.compile(pattern));
+        return useDelimiter(Pattern.compile(Objects.requireNonNull(pattern)));
     }
 
     public Locale locale() {
-        ensureOpen();
         return locale;
     }
 
     public TScanner useLocale(Locale locale) {
-        ensureOpen();
         this.locale = Objects.requireNonNull(locale);
         return this;
     }
 
     public int radix() {
-        ensureOpen();
         return radix;
     }
 
     public TScanner useRadix(int radix) {
-        ensureOpen();
-        if (radix < Character.MIN_RADIX || radix > Character.MAX_RADIX) {
-            throw new IllegalArgumentException("radix:" + radix);
-        }
+        checkRadix(radix);
         this.radix = radix;
         return this;
     }
 
     public MatchResult match() {
-        ensureOpen();
+        requireOpen();
         if (lastMatch == null) {
-            throw new IllegalStateException("No match result available");
+            throw new IllegalStateException();
         }
         return lastMatch;
     }
 
     @Override
     public String toString() {
-        return "java.util.Scanner[delimiters=" + delimiter + "][position=" + position + "][match valid="
-                + (lastMatch != null) + "][closed=" + closed + "][radix=" + radix + "][locale=" + locale + "]";
+        return "java.util.Scanner[delimiters=" + delimiter + " position=" + position + " closed=" + closed
+                + " radix=" + radix + " locale=" + locale + "]";
     }
 
     @Override
     public boolean hasNext() {
-        ensureOpen();
-        return skipDelimiterPosition(position) < input.length();
+        requireOpen();
+        return peekToken() != null;
     }
 
     @Override
     public String next() {
-        ensureOpen();
-        int start = skipDelimiterPosition(position);
-        if (start >= input.length()) {
-            throw new NoSuchElementException();
+        requireOpen();
+        Token token = peekToken();
+        if (token == null) {
+            throw noSuchToken();
         }
-        int end = findTokenEnd(start);
-        position = end;
-        setLastMatch(Pattern.compile("(?s).*").matcher(input.substring(start, end)));
-        return input.substring(start, end);
+        position = token.end;
+        lastMatch = new SimpleMatchResult(token.start, token.end, token.text);
+        return token.text;
     }
 
     @Override
@@ -224,112 +208,98 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public boolean hasNext(String pattern) {
-        return hasNext(Pattern.compile(pattern));
+        return hasNext(Pattern.compile(Objects.requireNonNull(pattern)));
     }
 
     public String next(String pattern) {
-        return next(Pattern.compile(pattern));
+        return next(Pattern.compile(Objects.requireNonNull(pattern)));
     }
 
     public boolean hasNext(Pattern pattern) {
-        ensureOpen();
+        requireOpen();
         Objects.requireNonNull(pattern);
-        int start = skipDelimiterPosition(position);
-        if (start >= input.length()) {
+        Token token = peekToken();
+        if (token == null) {
             return false;
         }
-        int end = findTokenEnd(start);
-        Matcher matcher = pattern.matcher(input.substring(start, end));
-        boolean result = matcher.matches();
-        if (result) {
-            lastMatch = matcher.toMatchResult();
+        Matcher matcher = pattern.matcher(token.text);
+        if (!matcher.matches()) {
+            return false;
         }
-        return result;
+        lastMatch = new OffsetMatchResult(matcher.toMatchResult(), token.start);
+        return true;
     }
 
     public String next(Pattern pattern) {
-        ensureOpen();
+        requireOpen();
         Objects.requireNonNull(pattern);
-        int start = skipDelimiterPosition(position);
-        if (start >= input.length()) {
-            throw new NoSuchElementException();
+        Token token = peekToken();
+        if (token == null) {
+            throw noSuchToken();
         }
-        int end = findTokenEnd(start);
-        String token = input.substring(start, end);
-        Matcher matcher = pattern.matcher(token);
+        Matcher matcher = pattern.matcher(token.text);
         if (!matcher.matches()) {
-            throw inputMismatch();
+            throw inputMismatch(token.text);
         }
-        position = end;
-        lastMatch = matcher.toMatchResult();
-        return token;
+        position = token.end;
+        lastMatch = new OffsetMatchResult(matcher.toMatchResult(), token.start);
+        return token.text;
     }
 
     public boolean hasNextLine() {
-        ensureOpen();
+        requireOpen();
+        ensureLoaded();
         return position < input.length();
     }
 
     public String nextLine() {
-        ensureOpen();
+        requireOpen();
+        ensureLoaded();
         if (position >= input.length()) {
             throw new NoSuchElementException("No line found");
         }
-        LineEnd lineEnd = findLineEnd(position);
-        String result = input.substring(position, lineEnd.contentEnd);
-        Matcher matcher = Pattern.compile(".*").matcher(result);
-        matcher.matches();
-        lastMatch = matcher.toMatchResult();
-        position = lineEnd.nextPosition;
+        Line line = findLine(position);
+        String result = input.substring(position, line.end);
+        lastMatch = new SimpleMatchResult(position, line.end, result);
+        position = line.next;
         return result;
     }
 
     public String findInLine(String pattern) {
-        return findInLine(Pattern.compile(pattern));
+        return findInLine(Pattern.compile(Objects.requireNonNull(pattern)));
     }
 
     public String findInLine(Pattern pattern) {
-        ensureOpen();
+        requireOpen();
         Objects.requireNonNull(pattern);
-        int end = findLineEnd(position).contentEnd;
-        Matcher matcher = pattern.matcher(input);
-        matcher.region(position, end);
-        if (!matcher.find()) {
-            return null;
-        }
-        position = matcher.end();
-        lastMatch = matcher.toMatchResult();
-        return matcher.group();
+        ensureLoaded();
+        Line line = findLine(position);
+        return find(pattern, line.end);
     }
 
     public String findWithinHorizon(String pattern, int horizon) {
-        return findWithinHorizon(Pattern.compile(pattern), horizon);
+        return findWithinHorizon(Pattern.compile(Objects.requireNonNull(pattern)), horizon);
     }
 
     public String findWithinHorizon(Pattern pattern, int horizon) {
-        ensureOpen();
+        requireOpen();
         Objects.requireNonNull(pattern);
         if (horizon < 0) {
             throw new IllegalArgumentException("horizon < 0");
         }
-        int end = horizon == 0 ? input.length() : Math.min(input.length(), position + horizon);
-        Matcher matcher = pattern.matcher(input);
-        matcher.region(position, end);
-        if (!matcher.find()) {
-            return null;
-        }
-        position = matcher.end();
-        lastMatch = matcher.toMatchResult();
-        return matcher.group();
+        ensureLoaded();
+        int end = horizon == 0 ? input.length() : offsetByCodePoints(position, horizon);
+        return find(pattern, end);
     }
 
     public TScanner skip(Pattern pattern) {
-        ensureOpen();
+        requireOpen();
         Objects.requireNonNull(pattern);
+        ensureLoaded();
         Matcher matcher = pattern.matcher(input);
         matcher.region(position, input.length());
         if (!matcher.lookingAt()) {
-            throw new NoSuchElementException();
+            throw new NoSuchElementException("Pattern not found");
         }
         position = matcher.end();
         lastMatch = matcher.toMatchResult();
@@ -337,15 +307,16 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public TScanner skip(String pattern) {
-        return skip(Pattern.compile(pattern));
+        return skip(Pattern.compile(Objects.requireNonNull(pattern)));
     }
 
     public boolean hasNextBoolean() {
-        return hasNext(BOOLEAN_PATTERN);
+        return hasNextParsed(BOOLEAN_PATTERN, token -> null);
     }
 
     public boolean nextBoolean() {
-        return Boolean.parseBoolean(next(BOOLEAN_PATTERN));
+        String token = nextParsed(BOOLEAN_PATTERN, tokenText -> tokenText);
+        return Boolean.parseBoolean(token);
     }
 
     public boolean hasNextByte() {
@@ -353,12 +324,7 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public boolean hasNextByte(int radix) {
-        try {
-            Byte.parseByte(normalizeIntegerToken(peekToken()), radix);
-            return true;
-        } catch (RuntimeException e) {
-            return false;
-        }
+        return hasNextParsed(radix, token -> Byte.parseByte(normalizeInteger(token, radix), radix));
     }
 
     public byte nextByte() {
@@ -366,14 +332,7 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public byte nextByte(int radix) {
-        String token = peekToken();
-        try {
-            byte result = Byte.parseByte(normalizeIntegerToken(token), radix);
-            consumePeekedToken(token);
-            return result;
-        } catch (RuntimeException e) {
-            throw inputMismatch();
-        }
+        return nextParsed(radix, token -> Byte.parseByte(normalizeInteger(token, radix), radix));
     }
 
     public boolean hasNextShort() {
@@ -381,12 +340,7 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public boolean hasNextShort(int radix) {
-        try {
-            Short.parseShort(normalizeIntegerToken(peekToken()), radix);
-            return true;
-        } catch (RuntimeException e) {
-            return false;
-        }
+        return hasNextParsed(radix, token -> Short.parseShort(normalizeInteger(token, radix), radix));
     }
 
     public short nextShort() {
@@ -394,14 +348,7 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public short nextShort(int radix) {
-        String token = peekToken();
-        try {
-            short result = Short.parseShort(normalizeIntegerToken(token), radix);
-            consumePeekedToken(token);
-            return result;
-        } catch (RuntimeException e) {
-            throw inputMismatch();
-        }
+        return nextParsed(radix, token -> Short.parseShort(normalizeInteger(token, radix), radix));
     }
 
     public boolean hasNextInt() {
@@ -409,12 +356,7 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public boolean hasNextInt(int radix) {
-        try {
-            Integer.parseInt(normalizeIntegerToken(peekToken()), radix);
-            return true;
-        } catch (RuntimeException e) {
-            return false;
-        }
+        return hasNextParsed(radix, token -> Integer.parseInt(normalizeInteger(token, radix), radix));
     }
 
     public int nextInt() {
@@ -422,14 +364,7 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public int nextInt(int radix) {
-        String token = peekToken();
-        try {
-            int result = Integer.parseInt(normalizeIntegerToken(token), radix);
-            consumePeekedToken(token);
-            return result;
-        } catch (RuntimeException e) {
-            throw inputMismatch();
-        }
+        return nextParsed(radix, token -> Integer.parseInt(normalizeInteger(token, radix), radix));
     }
 
     public boolean hasNextLong() {
@@ -437,12 +372,7 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public boolean hasNextLong(int radix) {
-        try {
-            Long.parseLong(normalizeIntegerToken(peekToken()), radix);
-            return true;
-        } catch (RuntimeException e) {
-            return false;
-        }
+        return hasNextParsed(radix, token -> Long.parseLong(normalizeInteger(token, radix), radix));
     }
 
     public long nextLong() {
@@ -450,54 +380,23 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public long nextLong(int radix) {
-        String token = peekToken();
-        try {
-            long result = Long.parseLong(normalizeIntegerToken(token), radix);
-            consumePeekedToken(token);
-            return result;
-        } catch (RuntimeException e) {
-            throw inputMismatch();
-        }
+        return nextParsed(radix, token -> Long.parseLong(normalizeInteger(token, radix), radix));
     }
 
     public boolean hasNextFloat() {
-        try {
-            Float.parseFloat(normalizeDecimalToken(peekToken()));
-            return true;
-        } catch (RuntimeException e) {
-            return false;
-        }
+        return hasNextParsed(token -> Float.parseFloat(normalizeDecimal(token)));
     }
 
     public float nextFloat() {
-        String token = peekToken();
-        try {
-            float result = Float.parseFloat(normalizeDecimalToken(token));
-            consumePeekedToken(token);
-            return result;
-        } catch (RuntimeException e) {
-            throw inputMismatch();
-        }
+        return nextParsed(token -> Float.parseFloat(normalizeDecimal(token)));
     }
 
     public boolean hasNextDouble() {
-        try {
-            Double.parseDouble(normalizeDecimalToken(peekToken()));
-            return true;
-        } catch (RuntimeException e) {
-            return false;
-        }
+        return hasNextParsed(token -> Double.parseDouble(normalizeDecimal(token)));
     }
 
     public double nextDouble() {
-        String token = peekToken();
-        try {
-            double result = Double.parseDouble(normalizeDecimalToken(token));
-            consumePeekedToken(token);
-            return result;
-        } catch (RuntimeException e) {
-            throw inputMismatch();
-        }
+        return nextParsed(token -> Double.parseDouble(normalizeDecimal(token)));
     }
 
     public boolean hasNextBigInteger() {
@@ -505,12 +404,7 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public boolean hasNextBigInteger(int radix) {
-        try {
-            new BigInteger(normalizeIntegerToken(peekToken()), radix);
-            return true;
-        } catch (RuntimeException e) {
-            return false;
-        }
+        return hasNextParsed(radix, token -> new BigInteger(normalizeInteger(token, radix), radix));
     }
 
     public BigInteger nextBigInteger() {
@@ -518,241 +412,533 @@ public final class TScanner implements Iterator<String>, Closeable {
     }
 
     public BigInteger nextBigInteger(int radix) {
-        String token = peekToken();
-        try {
-            BigInteger result = new BigInteger(normalizeIntegerToken(token), radix);
-            consumePeekedToken(token);
-            return result;
-        } catch (RuntimeException e) {
-            throw inputMismatch();
-        }
+        return nextParsed(radix, token -> new BigInteger(normalizeInteger(token, radix), radix));
     }
 
     public boolean hasNextBigDecimal() {
+        return hasNextParsed(token -> new BigDecimal(normalizeDecimal(token)));
+    }
+
+    public BigDecimal nextBigDecimal() {
+        return nextParsed(token -> new BigDecimal(normalizeDecimal(token)));
+    }
+
+    public TScanner reset() {
+        delimiter = DEFAULT_DELIMITER;
+        locale = initialLocale;
+        radix = 10;
+        return this;
+    }
+
+    public Stream<String> tokens() {
+        requireOpen();
+        Iterator<String> iterator = new Iterator<String>() {
+            @Override
+            public boolean hasNext() {
+                return TScanner.this.hasNext();
+            }
+
+            @Override
+            public String next() {
+                return TScanner.this.next();
+            }
+        };
+        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED
+                | Spliterator.NONNULL), false).onClose(this::close);
+    }
+
+    public Stream<MatchResult> findAll(Pattern pattern) {
+        requireOpen();
+        Objects.requireNonNull(pattern);
+        Iterator<MatchResult> iterator = new Iterator<MatchResult>() {
+            private MatchResult next;
+            private boolean ready;
+
+            @Override
+            public boolean hasNext() {
+                if (!ready) {
+                    String found = findWithinHorizon(pattern, 0);
+                    if (found != null) {
+                        next = match();
+                    }
+                    ready = true;
+                }
+                return next != null;
+            }
+
+            @Override
+            public MatchResult next() {
+                if (!hasNext()) {
+                    throw noSuchToken();
+                }
+                MatchResult result = next;
+                next = null;
+                ready = false;
+                return result;
+            }
+        };
+        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED
+                | Spliterator.NONNULL), false).onClose(this::close);
+    }
+
+    public Stream<MatchResult> findAll(String patString) {
+        return findAll(Pattern.compile(Objects.requireNonNull(patString)));
+    }
+
+    private String find(Pattern pattern, int end) {
+        Matcher matcher = pattern.matcher(input);
+        matcher.region(position, end);
+        if (!matcher.find()) {
+            return null;
+        }
+        position = matcher.end();
+        lastMatch = matcher.toMatchResult();
+        return matcher.group();
+    }
+
+    private Token peekToken() {
+        ensureLoaded();
+        int start = skipDelimiters(position);
+        if (start > input.length()) {
+            return null;
+        }
+        if (start == input.length()) {
+            return null;
+        }
+        Matcher matcher = delimiter.matcher(input);
+        if (matcher.find(start)) {
+            return new Token(start, matcher.start());
+        }
+        return new Token(start, input.length());
+    }
+
+    private int skipDelimiters(int start) {
+        Matcher matcher = delimiter.matcher(input);
+        if (start < input.length()) {
+            matcher.region(start, input.length());
+            if (matcher.lookingAt() && matcher.end() > start) {
+                return matcher.end();
+            }
+        }
+        return start;
+    }
+
+    private Line findLine(int start) {
+        int index = start;
+        while (index < input.length()) {
+            char c = input.charAt(index);
+            if (c == '\n') {
+                return new Line(index, index + 1);
+            } else if (c == '\r') {
+                int next = index + 1;
+                if (next < input.length() && input.charAt(next) == '\n') {
+                    next++;
+                }
+                return new Line(index, next);
+            } else if (c == '\u0085' || c == '\u2028' || c == '\u2029') {
+                return new Line(index, index + 1);
+            }
+            index++;
+        }
+        return new Line(input.length(), input.length());
+    }
+
+    private int offsetByCodePoints(int start, int count) {
+        int index = start;
+        while (count-- > 0 && index < input.length()) {
+            index += Character.charCount(input.codePointAt(index));
+        }
+        return index;
+    }
+
+    private void ensureLoaded() {
+        if (input != null) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        CharBuffer buffer = CharBuffer.allocate(BUFFER_SIZE);
         try {
-            new BigDecimal(normalizeDecimalToken(peekToken()));
+            while (true) {
+                buffer.clear();
+                int read = source.read(buffer);
+                if (read < 0) {
+                    break;
+                }
+                buffer.flip();
+                sb.append(buffer, 0, buffer.length());
+            }
+        } catch (IOException e) {
+            lastIOException = e;
+        }
+        input = sb.toString();
+    }
+
+    private void requireOpen() {
+        if (closed) {
+            throw new IllegalStateException("Scanner closed");
+        }
+    }
+
+    private boolean hasNextParsed(Parser<?> parser) {
+        requireOpen();
+        Token token = peekToken();
+        if (token == null) {
+            return false;
+        }
+        try {
+            parser.parse(token.text);
+            lastMatch = new SimpleMatchResult(token.start, token.end, token.text);
             return true;
         } catch (RuntimeException e) {
             return false;
         }
     }
 
-    public BigDecimal nextBigDecimal() {
-        String token = peekToken();
+    private boolean hasNextParsed(Pattern pattern, Parser<?> parser) {
+        requireOpen();
+        Token token = peekToken();
+        if (token == null) {
+            return false;
+        }
+        Matcher matcher = pattern.matcher(token.text);
+        if (!matcher.matches()) {
+            return false;
+        }
+        parser.parse(token.text);
+        lastMatch = new OffsetMatchResult(matcher.toMatchResult(), token.start);
+        return true;
+    }
+
+    private boolean hasNextParsed(int radix, Parser<?> parser) {
+        checkRadix(radix);
+        return hasNextParsed(parser);
+    }
+
+    private <T> T nextParsed(Parser<T> parser) {
+        requireOpen();
+        Token token = peekToken();
+        if (token == null) {
+            throw noSuchToken();
+        }
         try {
-            BigDecimal result = new BigDecimal(normalizeDecimalToken(token));
-            consumePeekedToken(token);
+            T result = parser.parse(token.text);
+            position = token.end;
+            lastMatch = new SimpleMatchResult(token.start, token.end, token.text);
             return result;
         } catch (RuntimeException e) {
-            throw inputMismatch();
+            throw inputMismatch(token.text);
         }
     }
 
-    public TScanner reset() {
-        ensureOpen();
-        delimiter = DEFAULT_DELIMITER;
-        locale = Locale.getDefault();
-        radix = 10;
-        return this;
-    }
-
-    public Stream<String> tokens() {
-        ensureOpen();
-        return StreamSupport.stream(new Spliterators.AbstractSpliterator<String>(Long.MAX_VALUE,
-                Spliterator.ORDERED | Spliterator.NONNULL) {
-            @Override
-            public boolean tryAdvance(Consumer<? super String> action) {
-                Objects.requireNonNull(action);
-                if (!TScanner.this.hasNext()) {
-                    return false;
-                }
-                action.accept(TScanner.this.next());
-                return true;
-            }
-        }, false);
-    }
-
-    public Stream<MatchResult> findAll(Pattern pattern) {
-        ensureOpen();
-        Objects.requireNonNull(pattern);
-        return StreamSupport.stream(new Spliterators.AbstractSpliterator<MatchResult>(Long.MAX_VALUE,
-                Spliterator.ORDERED | Spliterator.NONNULL) {
-            @Override
-            public boolean tryAdvance(Consumer<? super MatchResult> action) {
-                Objects.requireNonNull(action);
-                String match = TScanner.this.findWithinHorizon(pattern, 0);
-                if (match == null) {
-                    return false;
-                }
-                action.accept(TScanner.this.lastMatch);
-                return true;
-            }
-        }, false);
-    }
-
-    public Stream<MatchResult> findAll(String pattern) {
-        return findAll(Pattern.compile(pattern));
-    }
-
-    private void readReadable(Readable source) {
-        StringBuilder sb = new StringBuilder();
-        CharBuffer buffer = CharBuffer.allocate(BUFFER_SIZE);
-        try {
-            while (true) {
-                int count = source.read(buffer);
-                if (count < 0) {
-                    break;
-                }
-                buffer.flip();
-                sb.append(buffer);
-                buffer.clear();
-            }
-        } catch (IOException e) {
-            ioException = e;
+    private <T> T nextParsed(Pattern pattern, Parser<T> parser) {
+        requireOpen();
+        Token token = peekToken();
+        if (token == null) {
+            throw noSuchToken();
         }
-        input = sb.toString();
-    }
-
-    private void readChannel(ReadableByteChannel source, Charset charset) {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        ByteBuffer buffer = ByteBuffer.allocate(BUFFER_SIZE);
-        try {
-            while (true) {
-                int count = source.read(buffer);
-                if (count < 0) {
-                    break;
-                }
-                buffer.flip();
-                byte[] bytes = new byte[buffer.remaining()];
-                buffer.get(bytes);
-                output.write(bytes, 0, bytes.length);
-                buffer.clear();
-            }
-        } catch (IOException e) {
-            ioException = e;
+        Matcher matcher = pattern.matcher(token.text);
+        if (!matcher.matches()) {
+            throw inputMismatch(token.text);
         }
-        input = new String(output.toByteArray(), charset);
-    }
-
-    private void ensureOpen() {
-        if (closed) {
-            throw new IllegalStateException("Scanner closed");
-        }
-    }
-
-    private int skipDelimiterPosition(int start) {
-        int result = start;
-        while (result < input.length()) {
-            Matcher matcher = delimiter.matcher(input);
-            matcher.region(result, input.length());
-            if (!matcher.lookingAt()) {
-                break;
-            }
-            int end = matcher.end();
-            if (end <= result) {
-                break;
-            }
-            result = end;
-        }
+        T result = parser.parse(token.text);
+        position = token.end;
+        lastMatch = new OffsetMatchResult(matcher.toMatchResult(), token.start);
         return result;
     }
 
-    private int findTokenEnd(int start) {
-        Matcher matcher = delimiter.matcher(input);
-        matcher.region(start, input.length());
-        if (!matcher.find()) {
-            return input.length();
-        }
-        int end = matcher.start();
-        return end < start ? start : end;
+    private <T> T nextParsed(int radix, Parser<T> parser) {
+        checkRadix(radix);
+        return nextParsed(parser);
     }
 
-    private String peekToken() {
-        ensureOpen();
-        int start = skipDelimiterPosition(position);
-        if (start >= input.length()) {
-            throw new NoSuchElementException();
-        }
-        return input.substring(start, findTokenEnd(start));
+    private NoSuchElementException noSuchToken() {
+        return new NoSuchElementException("No token available");
     }
 
-    private void consumePeekedToken(String token) {
-        int start = skipDelimiterPosition(position);
-        position = findTokenEnd(start);
-        setLastMatch(Pattern.compile("(?s).*").matcher(token));
+    private TInputMismatchException inputMismatch(String token) {
+        return new TInputMismatchException("Token does not match expected type: " + token);
     }
 
-    private void setLastMatch(Matcher matcher) {
-        matcher.matches();
-        lastMatch = matcher.toMatchResult();
-    }
-
-    private String normalizeIntegerToken(String token) {
-        DecimalFormatSymbols symbols = DecimalFormatSymbols.getInstance(locale);
-        char grouping = symbols.getGroupingSeparator();
-        if (grouping != 0) {
-            token = token.replace(String.valueOf(grouping), "");
-        }
-        return normalizeSigns(token, symbols);
-    }
-
-    private String normalizeDecimalToken(String token) {
-        DecimalFormatSymbols symbols = DecimalFormatSymbols.getInstance(locale);
-        char grouping = symbols.getGroupingSeparator();
-        if (grouping != 0) {
-            token = token.replace(String.valueOf(grouping), "");
-        }
-        char decimal = symbols.getDecimalSeparator();
-        if (decimal != '.') {
-            token = token.replace(decimal, '.');
-        }
-        return normalizeSigns(token, symbols);
-    }
-
-    private String normalizeSigns(String token, DecimalFormatSymbols symbols) {
-        String minus = symbols.getMinusSign() == '-' ? null : String.valueOf(symbols.getMinusSign());
-        if (minus != null && token.startsWith(minus)) {
-            token = "-" + token.substring(minus.length());
-        }
-        if (token.startsWith("+")) {
-            return token.substring(1);
-        }
-        return token;
-    }
-
-    private TInputMismatchException inputMismatch() {
-        return new TInputMismatchException();
-    }
-
-    private LineEnd findLineEnd(int start) {
-        int index = start;
-        while (index < input.length()) {
-            char c = input.charAt(index);
-            if (c == '\n') {
-                return new LineEnd(index, index + 1);
+    private String normalizeInteger(String token, int radix) {
+        String normalized = normalizeSignAndSeparators(token, false);
+        StringBuilder sb = new StringBuilder(normalized.length());
+        for (int i = 0; i < normalized.length();) {
+            int cp = normalized.codePointAt(i);
+            int digit = Character.digit(cp, radix);
+            if (digit >= 0) {
+                sb.append(Character.forDigit(digit, radix));
+            } else {
+                sb.appendCodePoint(cp);
             }
-            if (c == '\r') {
-                int next = index + 1;
-                if (next < input.length() && input.charAt(next) == '\n') {
-                    next++;
+            i += Character.charCount(cp);
+        }
+        return sb.toString();
+    }
+
+    private String normalizeDecimal(String token) {
+        DecimalFormatSymbols symbols = decimalSymbols();
+        if (token.equals(symbols.getNaN())) {
+            return "NaN";
+        } else if (token.equals(symbols.getInfinity())) {
+            return "Infinity";
+        } else if (token.equals("+" + symbols.getInfinity()) || token.equals("+Infinity")) {
+            return "Infinity";
+        } else if (token.equals("-" + symbols.getInfinity()) || token.equals("-Infinity")) {
+            return "-Infinity";
+        }
+
+        String normalized = normalizeSignAndSeparators(token, true);
+        StringBuilder sb = new StringBuilder(normalized.length());
+        for (int i = 0; i < normalized.length();) {
+            int cp = normalized.codePointAt(i);
+            int digit = Character.digit(cp, 10);
+            if (digit >= 0) {
+                sb.append((char) ('0' + digit));
+            } else {
+                sb.appendCodePoint(cp);
+            }
+            i += Character.charCount(cp);
+        }
+        return sb.toString();
+    }
+
+    private String normalizeSignAndSeparators(String token, boolean decimal) {
+        DecimalFormatSymbols symbols = decimalSymbols();
+        String value = token;
+        boolean negative = false;
+
+        if (value.startsWith("-")) {
+            value = value.substring(1);
+            negative = true;
+        } else if (value.startsWith("+")) {
+            value = value.substring(1);
+        }
+
+        char group = symbols.getGroupingSeparator();
+        char decimalSeparator = symbols.getDecimalSeparator();
+        StringBuilder sb = new StringBuilder(value.length() + 1);
+        if (negative && (value.isEmpty() || value.charAt(0) != '-')) {
+            sb.append('-');
+        }
+        for (int i = 0; i < value.length(); ++i) {
+            char c = value.charAt(i);
+            if (c == group) {
+                continue;
+            }
+            sb.append(decimal && c == decimalSeparator ? '.' : c);
+        }
+        return sb.toString();
+    }
+
+    private DecimalFormatSymbols decimalSymbols() {
+        return new DecimalFormatSymbols(locale);
+    }
+
+    private void checkRadix(int radix) {
+        if (radix < Character.MIN_RADIX || radix > Character.MAX_RADIX) {
+            throw new IllegalArgumentException("radix:" + radix);
+        }
+    }
+
+    private interface Parser<T> {
+        T parse(String token);
+    }
+
+    private class Token {
+        final int start;
+        final int end;
+        final String text;
+
+        Token(int start, int end) {
+            this.start = start;
+            this.end = end;
+            this.text = input.substring(start, end);
+        }
+    }
+
+    private static class Line {
+        final int end;
+        final int next;
+
+        Line(int end, int next) {
+            this.end = end;
+            this.next = next;
+        }
+    }
+
+    private static class SimpleMatchResult implements MatchResult {
+        private final int start;
+        private final int end;
+        private final String text;
+
+        SimpleMatchResult(int start, int end, String text) {
+            this.start = start;
+            this.end = end;
+            this.text = text;
+        }
+
+        @Override
+        public int start() {
+            return start;
+        }
+
+        @Override
+        public int start(int group) {
+            checkGroup(group);
+            return start;
+        }
+
+        @Override
+        public int end() {
+            return end;
+        }
+
+        @Override
+        public int end(int group) {
+            checkGroup(group);
+            return end;
+        }
+
+        @Override
+        public String group() {
+            return text;
+        }
+
+        @Override
+        public String group(int group) {
+            checkGroup(group);
+            return text;
+        }
+
+        @Override
+        public int groupCount() {
+            return 0;
+        }
+
+        private void checkGroup(int group) {
+            if (group != 0) {
+                throw new IndexOutOfBoundsException();
+            }
+        }
+    }
+
+    private static class OffsetMatchResult implements MatchResult {
+        private final MatchResult result;
+        private final int offset;
+
+        OffsetMatchResult(MatchResult result, int offset) {
+            this.result = result;
+            this.offset = offset;
+        }
+
+        @Override
+        public int start() {
+            return result.start() + offset;
+        }
+
+        @Override
+        public int start(int group) {
+            int start = result.start(group);
+            return start < 0 ? start : start + offset;
+        }
+
+        @Override
+        public int end() {
+            return result.end() + offset;
+        }
+
+        @Override
+        public int end(int group) {
+            int end = result.end(group);
+            return end < 0 ? end : end + offset;
+        }
+
+        @Override
+        public String group() {
+            return result.group();
+        }
+
+        @Override
+        public String group(int group) {
+            return result.group(group);
+        }
+
+        @Override
+        public int groupCount() {
+            return result.groupCount();
+        }
+    }
+
+    private static class ChannelReader extends Reader {
+        private final ReadableByteChannel channel;
+        private final CharsetDecoder decoder;
+        private final ByteBuffer bytes = ByteBuffer.allocate(BUFFER_SIZE);
+        private final CharBuffer chars = CharBuffer.allocate(BUFFER_SIZE);
+        private boolean endOfInput;
+        private boolean closed;
+
+        ChannelReader(ReadableByteChannel channel, Charset charset) {
+            this.channel = channel;
+            this.decoder = charset.newDecoder();
+            bytes.limit(0);
+            chars.limit(0);
+        }
+
+        @Override
+        public int read(char[] cbuf, int off, int len) throws IOException {
+            if (closed) {
+                throw new IOException("Reader closed");
+            }
+            if (len == 0) {
+                return 0;
+            }
+            int read = 0;
+            while (read < len) {
+                if (chars.hasRemaining()) {
+                    int count = Math.min(len - read, chars.remaining());
+                    chars.get(cbuf, off + read, count);
+                    read += count;
+                    continue;
                 }
-                return new LineEnd(index, next);
+                if (!fill()) {
+                    break;
+                }
             }
-            if (c == '\u0085' || c == '\u2028' || c == '\u2029') {
-                return new LineEnd(index, index + 1);
-            }
-            index++;
+            return read > 0 ? read : -1;
         }
-        return new LineEnd(input.length(), input.length());
-    }
 
-    private static final class LineEnd {
-        final int contentEnd;
-        final int nextPosition;
+        private boolean fill() throws IOException {
+            chars.clear();
+            while (true) {
+                CoderResult result = decoder.decode(bytes, chars, endOfInput);
+                if (result.isOverflow()) {
+                    chars.flip();
+                    return true;
+                }
+                if (result.isError()) {
+                    result.throwException();
+                }
+                if (endOfInput) {
+                    result = decoder.flush(chars);
+                    if (result.isError()) {
+                        result.throwException();
+                    }
+                    chars.flip();
+                    return chars.hasRemaining();
+                }
+                bytes.compact();
+                int count = channel.read(bytes);
+                bytes.flip();
+                if (count < 0) {
+                    endOfInput = true;
+                }
+            }
+        }
 
-        LineEnd(int contentEnd, int nextPosition) {
-            this.contentEnd = contentEnd;
-            this.nextPosition = nextPosition;
+        @Override
+        public void close() throws IOException {
+            closed = true;
+            channel.close();
         }
     }
 }

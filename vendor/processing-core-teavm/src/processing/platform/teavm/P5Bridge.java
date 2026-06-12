@@ -242,6 +242,11 @@ final class P5Bridge {
   static native JSObject createCanvas(JSObject p5, int width, int height, boolean webgl);
 
 
+  @JSBody(params = { "p5", "density" }, script =
+    "p5.pixelDensity(density);")
+  static native void pixelDensity(JSObject p5, int density);
+
+
   @JSBody(params = { "p5", "width", "height" }, script =
     "p5.resizeCanvas(width, height, true);")
   static native void resizeCanvas(JSObject p5, int width, int height);
@@ -290,14 +295,37 @@ final class P5Bridge {
   static native int imageHeight(JSObject image);
 
 
-  @JSBody(params = { "image" }, script =
-    "image.loadPixels();")
-  static native void imageLoadPixels(JSObject image);
+  @JSBody(params = { "image", "destPixels", "pixelCount" }, script =
+    "if (image && typeof image.loadPixels === 'function') image.loadPixels();" +
+    "var pixels = image && image.pixels ? image.pixels : null;" +
+    "if (!pixels || !destPixels) return 0;" +
+    "var maxPixels = pixels.length >>> 2;" +
+    "if (pixelCount > destPixels.length) pixelCount = destPixels.length;" +
+    "if (pixelCount > maxPixels) pixelCount = maxPixels;" +
+    "for (var i = 0, base = 0; i < pixelCount; i++, base += 4) {" +
+    "  destPixels[i] = (pixels[base + 3] << 24) | (pixels[base] << 16) | (pixels[base + 1] << 8) | pixels[base + 2];" +
+    "}" +
+    "return pixelCount;")
+  static native int imageLoadAndCopyImagePixelsToIntArray(JSObject image, int[] destPixels, int pixelCount);
 
 
-  @JSBody(params = { "image" }, script =
-    "image.updatePixels();")
-  static native void imageUpdatePixels(JSObject image);
+  @JSBody(params = { "image", "sourcePixels", "pixelCount" }, script =
+    "if (image && typeof image.loadPixels === 'function') image.loadPixels();" +
+    "var pixels = image && image.pixels ? image.pixels : null;" +
+    "if (!pixels || !sourcePixels) return 0;" +
+    "if (pixelCount > sourcePixels.length) pixelCount = sourcePixels.length;" +
+    "var bytePixelCount = pixels.length >>> 2;" +
+    "if (pixelCount > bytePixelCount) pixelCount = bytePixelCount;" +
+    "for (var i = 0, base = 0; i < pixelCount; i++, base += 4) {" +
+    "  var argb = sourcePixels[i];" +
+    "  pixels[base] = (argb >>> 16) & 255;" +
+    "  pixels[base + 1] = (argb >>> 8) & 255;" +
+    "  pixels[base + 2] = argb & 255;" +
+    "  pixels[base + 3] = argb >>> 24;" +
+    "}" +
+    "if (image && typeof image.updatePixels === 'function') image.updatePixels();" +
+    "return pixelCount;")
+  static native int imageLoadAndWriteImagePixels(JSObject image, int[] sourcePixels, int pixelCount);
 
 
   @JSBody(params = { "image", "width", "height" }, script =
@@ -341,44 +369,37 @@ final class P5Bridge {
   static native JSObject imageResize(JSObject image, int width, int height);
 
 
-  @JSBody(params = { "image" }, script =
-    "return image.pixels.length;")
-  static native int imagePixelLength(JSObject image);
+  @JSBody(params = { "p5", "destPixels", "pixelCount" }, script =
+    "if (p5 && typeof p5.loadPixels === 'function') p5.loadPixels();" +
+    "var pixels = p5 && p5.pixels ? p5.pixels : null;" +
+    "if (!pixels || !destPixels) return 0;" +
+    "var maxPixels = pixels.length >>> 2;" +
+    "if (pixelCount > destPixels.length) pixelCount = destPixels.length;" +
+    "if (pixelCount > maxPixels) pixelCount = maxPixels;" +
+    "for (var i = 0, base = 0; i < pixelCount; i++, base += 4) {" +
+    "  destPixels[i] = (pixels[base + 3] << 24) | (pixels[base] << 16) | (pixels[base + 1] << 8) | pixels[base + 2];" +
+    "}" +
+    "return pixelCount;")
+  static native int loadPixelsAndCopyHostPixelsToIntArray(JSObject p5, int[] destPixels, int pixelCount);
 
 
-  @JSBody(params = { "image", "index" }, script =
-    "return image.pixels[index] | 0;")
-  static native int imagePixel(JSObject image, int index);
-
-
-  @JSBody(params = { "image", "index", "value" }, script =
-    "image.pixels[index] = value & 255;")
-  static native void setImagePixel(JSObject image, int index, int value);
-
-
-  @JSBody(params = { "p5" }, script =
-    "p5.loadPixels();")
-  static native void loadPixels(JSObject p5);
-
-
-  @JSBody(params = { "p5" }, script =
-    "p5.updatePixels();")
-  static native void updatePixels(JSObject p5);
-
-
-  @JSBody(params = { "p5" }, script =
-    "return p5.pixels.length;")
-  static native int pixelLength(JSObject p5);
-
-
-  @JSBody(params = { "p5", "index" }, script =
-    "return p5.pixels[index] | 0;")
-  static native int pixel(JSObject p5, int index);
-
-
-  @JSBody(params = { "p5", "index", "value" }, script =
-    "p5.pixels[index] = value & 255;")
-  static native void setPixel(JSObject p5, int index, int value);
+  @JSBody(params = { "p5", "sourcePixels", "pixelCount" }, script =
+    "if (p5 && typeof p5.loadPixels === 'function') p5.loadPixels();" +
+    "var pixels = p5 && p5.pixels ? p5.pixels : null;" +
+    "if (!pixels || !sourcePixels) return 0;" +
+    "if (pixelCount > sourcePixels.length) pixelCount = sourcePixels.length;" +
+    "var bytePixelCount = pixels.length >>> 2;" +
+    "if (pixelCount > bytePixelCount) pixelCount = bytePixelCount;" +
+    "for (var i = 0, base = 0; i < pixelCount; i++, base += 4) {" +
+    "  var argb = sourcePixels[i];" +
+    "  pixels[base] = (argb >>> 16) & 255;" +
+    "  pixels[base + 1] = (argb >>> 8) & 255;" +
+    "  pixels[base + 2] = argb & 255;" +
+    "  pixels[base + 3] = argb >>> 24;" +
+    "}" +
+    "if (p5 && typeof p5.updatePixels === 'function') p5.updatePixels();" +
+    "return pixelCount;")
+  static native int loadAndWriteHostPixels(JSObject p5, int[] sourcePixels, int pixelCount);
 
 
   @JSBody(params = { "p5", "r", "g", "b", "a" }, script =

@@ -74,16 +74,7 @@ public class P5Image extends PImage {
       return;
     }
 
-    P5Bridge.imageLoadPixels(nativeImage);
-    int pixelCount = Math.min(pixels.length, P5Bridge.imagePixelLength(nativeImage) / 4);
-    for (int i = 0; i < pixelCount; i++) {
-      int base = i * 4;
-      int r = P5Bridge.imagePixel(nativeImage, base);
-      int g = P5Bridge.imagePixel(nativeImage, base + 1);
-      int b = P5Bridge.imagePixel(nativeImage, base + 2);
-      int a = P5Bridge.imagePixel(nativeImage, base + 3);
-      pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
-    }
+    P5Bridge.imageLoadAndCopyImagePixelsToIntArray(nativeImage, pixels, pixels.length);
     setLoaded();
   }
 
@@ -95,17 +86,7 @@ public class P5Image extends PImage {
       return;
     }
 
-    P5Bridge.imageLoadPixels(nativeImage);
-    int pixelCount = Math.min(pixels.length, P5Bridge.imagePixelLength(nativeImage) / 4);
-    for (int i = 0; i < pixelCount; i++) {
-      int argb = pixels[i];
-      int base = i * 4;
-      P5Bridge.setImagePixel(nativeImage, base, (argb >> 16) & 0xff);
-      P5Bridge.setImagePixel(nativeImage, base + 1, (argb >> 8) & 0xff);
-      P5Bridge.setImagePixel(nativeImage, base + 2, argb & 0xff);
-      P5Bridge.setImagePixel(nativeImage, base + 3, (argb >>> 24) & 0xff);
-    }
-    P5Bridge.imageUpdatePixels(nativeImage);
+    P5Bridge.imageLoadAndWriteImagePixels(nativeImage, pixels, pixels.length);
     super.updatePixels(x, y, w, h);
   }
 
@@ -195,17 +176,7 @@ public class P5Image extends PImage {
     }
 
     source.loadPixels();
-    P5Bridge.imageLoadPixels(nativeImage);
-    int pixelCount = Math.min(source.pixels.length, P5Bridge.imagePixelLength(nativeImage) / 4);
-    for (int i = 0; i < pixelCount; i++) {
-      int argb = source.pixels[i];
-      int base = i * 4;
-      P5Bridge.setImagePixel(nativeImage, base, (argb >> 16) & 0xff);
-      P5Bridge.setImagePixel(nativeImage, base + 1, (argb >> 8) & 0xff);
-      P5Bridge.setImagePixel(nativeImage, base + 2, argb & 0xff);
-      P5Bridge.setImagePixel(nativeImage, base + 3, (argb >>> 24) & 0xff);
-    }
-    P5Bridge.imageUpdatePixels(nativeImage);
+    P5Bridge.imageLoadAndWriteImagePixels(nativeImage, source.pixels, source.pixels.length);
     return nativeImage;
   }
 }

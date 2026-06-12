@@ -40,5 +40,26 @@ Current file behavior:
 - Java file APIs use the exact requested path.
 - Processing APIs use Processing lookup rules, so `loadImage("image.png")` tries
   the sketch `data/` location before the literal path.
+- File reads are built into the runtime bridge and use `fetch(path)`. There is
+  no file-open callback.
+- File write and close notifications are optional synchronous callbacks on the
+  program options: `fs.onFileWrite(path, content)` and
+  `fs.onFileClose(path, mode, content)`.
+- `stdio.stdin` is a string. `stdio.stdout` and `stdio.stderr` are functions.
 - Missing Processing images return `null` and print a Processing-style error
   instead of throwing `FileNotFoundException`.
+
+Manual Wasm mounting uses program objects:
+
+```js
+import { createCanvas2DBackend, createProcessingProgram } from "../../dist/teavm-javac/processing-teavm.js";
+
+const program = await createProcessingProgram(wasmBytes, {
+  fs: {
+    onFileWrite(path, content) {},
+    onFileClose(path, mode, content) {},
+  },
+});
+const backend = createCanvas2DBackend(document.body, {});
+const sketch = program.execute({ canvasBackend: backend });
+```

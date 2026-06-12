@@ -50,6 +50,8 @@ import org.teavm.classlib.java.lang.LongNativeGenerator;
 import org.teavm.classlib.java.lang.MathNativeGenerator;
 import org.teavm.classlib.java.lang.SystemDependencyPlugin;
 import org.teavm.classlib.java.lang.SystemNativeGenerator;
+import org.teavm.dependency.AbstractDependencyListener;
+import org.teavm.dependency.DependencyAgent;
 import org.teavm.debugging.information.DebugInformationBuilder;
 import org.teavm.debugging.information.SourceMapsWriter;
 import org.teavm.dependency.FastDependencyAnalyzer;
@@ -65,6 +67,7 @@ import org.teavm.model.ClassReaderSource;
 import org.teavm.model.ClassHolderSource;
 import org.teavm.model.MethodReference;
 import org.teavm.model.ReferenceCache;
+import org.teavm.model.ValueType;
 import org.teavm.parsing.ClasspathClassHolderSource;
 import org.teavm.parsing.CompositeClassHolderSource;
 import org.teavm.parsing.resource.CompositeResourceProvider;
@@ -84,6 +87,13 @@ import static com.sun.tools.javac.comp.CompileStates.CompileState;
 @JSClass(name = "Compiler")
 public final class Compiler {
     private static final String JSO_JS_CLASS = "org.teavm.jso.impl.JS";
+    private static final String WASM_GC_JS_RUNTIME_CLASS = "org.teavm.jso.impl.wasmgc.WasmGCJSRuntime";
+    private static final ValueType STRING_TYPE = ValueType.object("java.lang.String");
+    private static final ValueType JS_OBJECT_TYPE = ValueType.object("org.teavm.jso.JSObject");
+    private static final MethodReference EXCEPTION_MESSAGE_METHOD = new MethodReference(Throwable.class, "getMessage",
+            String.class);
+    private static final MethodReference STRING_TO_JS_METHOD = new MethodReference(WASM_GC_JS_RUNTIME_CLASS,
+            "stringToJs", STRING_TYPE, JS_OBJECT_TYPE);
     private static final Set<String> INTEGER_NATIVE_METHODS = Set.of("divideUnsigned", "remainderUnsigned",
             "compareUnsigned");
     private static final Set<String> DOUBLE_NATIVE_METHODS = Set.of("doubleEqualsJs", "doubleToRawLongBits",
@@ -476,11 +486,37 @@ public final class Compiler {
         var refCache = new ReferenceCache();
         var teavm = createTeaVM(target, refCache, optimizationLevel, fastGlobalAnalysis);
         teavm.setEntryPoint(mainClass);
+        linkWasmExceptionDecoration(teavm, target);
         target.setObfuscated(false);
         target.setDebugInfoLocation(WasmDebugInfoLocation.EMBEDDED);
         target.setDebugInfo(true);
         teavm.build(new MemoryBuildTarget(wasmOutputFiles), outputName);
         return reportTeaVMDiagnostics(teavm);
+    }
+
+    private void linkWasmExceptionDecoration(TeaVM teavm, WasmGCTarget target) {
+        teavm.add(new AbstractDependencyListener() {
+            @Override
+            public void started(DependencyAgent agent) {
+                var exceptionMessage = agent.linkMethod(EXCEPTION_MESSAGE_METHOD);
+                exceptionMessage.getVariable(0).propagate(agent.getType(ValueType.object("java.lang.Throwable")));
+                exceptionMessage.use();
+
+                var stringToJs = agent.linkMethod(STRING_TO_JS_METHOD);
+                stringToJs.getVariable(1).propagate(agent.getType(STRING_TYPE));
+                stringToJs.use();
+            }
+        });
+
+        var exported = new boolean[1];
+        target.addClassConsumer((context, className) -> {
+            if (exported[0]) {
+                return;
+            }
+            exported[0] = true;
+            context.functions().forInstanceMethod(EXCEPTION_MESSAGE_METHOD).setExportName("teavm.exceptionMessage");
+            context.functions().forStaticMethod(STRING_TO_JS_METHOD).setExportName("teavm.stringToJs");
+        });
     }
 
     @JSExport
