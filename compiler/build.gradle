@@ -55,8 +55,10 @@ sourceSets {
         }
     }
     classlibEmu {
+        java.srcDir "src/sharedClasslibEmu/java"
     }
     runtimeClasslibEmu {
+        java.srcDir "src/sharedClasslibEmu/java"
         compileClasspath += configurations.classlibInput + configurations.classlibAuxInput
     }
 }
@@ -175,6 +177,8 @@ def prepareTeaVMClassLib = tasks.register("prepareTeaVMClassLib", Copy) {
     from(sourceSets.runtimeClasslibEmu.output) {
         include "org/teavm/classlib/java/nio/TByteBuffer.class"
         include "org/teavm/classlib/java/nio/TCharBuffer.class"
+        include "org/teavm/classlib/java/util/TInputMismatchException.class"
+        include "org/teavm/classlib/java/util/TScanner*.class"
     }
     into project.layout.buildDirectory.dir("tmp/classlib-runtime")
 }
