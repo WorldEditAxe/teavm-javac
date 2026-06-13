@@ -88,10 +88,14 @@ import static com.sun.tools.javac.comp.CompileStates.CompileState;
 public final class Compiler {
     private static final String JSO_JS_CLASS = "org.teavm.jso.impl.JS";
     private static final String WASM_GC_JS_RUNTIME_CLASS = "org.teavm.jso.impl.wasmgc.WasmGCJSRuntime";
+    private static final String EXCEPTION_BRIDGE_CLASS = "org.teavm.runtime.TeaVMJavacExceptionBridge";
+    private static final ValueType THROWABLE_TYPE = ValueType.object("java.lang.Throwable");
     private static final ValueType STRING_TYPE = ValueType.object("java.lang.String");
     private static final ValueType JS_OBJECT_TYPE = ValueType.object("org.teavm.jso.JSObject");
     private static final MethodReference EXCEPTION_MESSAGE_METHOD = new MethodReference(Throwable.class, "getMessage",
             String.class);
+    private static final MethodReference EXCEPTION_TO_STRING_METHOD = new MethodReference(EXCEPTION_BRIDGE_CLASS,
+            "exceptionToString", THROWABLE_TYPE, STRING_TYPE);
     private static final MethodReference STRING_TO_JS_METHOD = new MethodReference(WASM_GC_JS_RUNTIME_CLASS,
             "stringToJs", STRING_TYPE, JS_OBJECT_TYPE);
     private static final Set<String> INTEGER_NATIVE_METHODS = Set.of("divideUnsigned", "remainderUnsigned",
@@ -499,8 +503,12 @@ public final class Compiler {
             @Override
             public void started(DependencyAgent agent) {
                 var exceptionMessage = agent.linkMethod(EXCEPTION_MESSAGE_METHOD);
-                exceptionMessage.getVariable(0).propagate(agent.getType(ValueType.object("java.lang.Throwable")));
+                exceptionMessage.getVariable(0).propagate(agent.getType(THROWABLE_TYPE));
                 exceptionMessage.use();
+
+                var exceptionToString = agent.linkMethod(EXCEPTION_TO_STRING_METHOD);
+                exceptionToString.getVariable(1).propagate(agent.getType(THROWABLE_TYPE));
+                exceptionToString.use();
 
                 var stringToJs = agent.linkMethod(STRING_TO_JS_METHOD);
                 stringToJs.getVariable(1).propagate(agent.getType(STRING_TYPE));
@@ -515,6 +523,7 @@ public final class Compiler {
             }
             exported[0] = true;
             context.functions().forInstanceMethod(EXCEPTION_MESSAGE_METHOD).setExportName("teavm.exceptionMessage");
+            context.functions().forStaticMethod(EXCEPTION_TO_STRING_METHOD).setExportName("teavm.exceptionToString");
             context.functions().forStaticMethod(STRING_TO_JS_METHOD).setExportName("teavm.stringToJs");
         });
     }

@@ -19,10 +19,12 @@ package org.teavm.javac;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.teavm.classlib.ReflectionContext;
 import org.teavm.classlib.ReflectionSupplier;
 import org.teavm.classlib.ResourceSupplier;
 import org.teavm.classlib.ResourceSupplierContext;
+import org.teavm.model.FieldReader;
 import org.teavm.model.MethodDescriptor;
 import org.teavm.model.ValueType;
 
@@ -75,7 +77,30 @@ public final class CompilerResourceSupplier implements ResourceSupplier, Reflect
     }
 
     @Override
+    public Collection<String> getAccessibleFields(ReflectionContext context, String className) {
+        if (!isApplicationClass(className)) {
+            return List.of();
+        }
+        var cls = context.getClassSource().get(className);
+        return cls != null
+                ? cls.getFields().stream().map(FieldReader::getName).collect(Collectors.toList())
+                : List.of();
+    }
+
+    @Override
     public Collection<MethodDescriptor> getAccessibleMethods(ReflectionContext context, String className) {
         return REFLECTIVE_DEFAULT_CONSTRUCTOR_CLASSES.contains(className) ? List.of(DEFAULT_CONSTRUCTOR) : List.of();
+    }
+
+    private static boolean isApplicationClass(String className) {
+        return !className.startsWith("java.")
+                && !className.startsWith("javax.")
+                && !className.startsWith("jdk.")
+                && !className.startsWith("sun.")
+                && !className.startsWith("com.sun.")
+                && !className.startsWith("org.teavm.")
+                && !className.startsWith("org.antlr.")
+                && !className.startsWith("org.threeten.")
+                && !className.startsWith("processing.");
     }
 }
